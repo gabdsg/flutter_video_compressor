@@ -1072,8 +1072,11 @@ class VVideoCompressionEngine(private val context: Context) {
                         if (shouldRetry) {
                             val isMuxerError =
                                 VVideoExportError.isMuxerError(exportException.errorCode)
-                            val nextQuality = getNextLowerQuality(config.quality)
-                                ?: config.quality.takeIf { isMuxerError }
+                            val nextQuality = if (isMuxerError) {
+                                config.quality
+                            } else {
+                                getNextLowerQuality(config.quality)
+                            }
                             if (nextQuality != null) {
                                 val failureType = if (isMuxerError) {
                                     "MP4 muxer failure"
@@ -1134,8 +1137,11 @@ class VVideoCompressionEngine(private val context: Context) {
             if (shouldRetry) {
                 val isMuxerError =
                     e is ExportException && VVideoExportError.isMuxerError(e.errorCode)
-                val nextQuality = getNextLowerQuality(config.quality)
-                    ?: config.quality.takeIf { isMuxerError }
+                val nextQuality = if (isMuxerError) {
+                    config.quality
+                } else {
+                    getNextLowerQuality(config.quality)
+                }
                 if (nextQuality != null) {
                     Log.w(
                         LOG_TAG,
