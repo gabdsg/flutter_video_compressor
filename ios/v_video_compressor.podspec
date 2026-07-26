@@ -4,17 +4,17 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'v_video_compressor'
-  s.version          = '1.2.1'
+  s.version          = '2.1.0'
   s.summary          = 'Efficient video compression plugin for Flutter'
   s.description      = <<-DESC
 A focused Flutter plugin for efficient video compression with real-time progress tracking,
 advanced configuration options, and high-quality output.
                        DESC
   s.homepage         = 'https://github.com/v-chat-sdk/v_video_compressor'
-  s.license          = { :file => '../LICENSE' }
+  s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'V Chat SDK Team' => 'support@v-chat-sdk.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'v_video_compressor/Sources/v_video_compressor/**/*.swift'
   
   # Dependencies
   s.dependency 'Flutter'
@@ -36,5 +36,9 @@ advanced configuration options, and high-quality output.
   s.frameworks = 'AVFoundation', 'UIKit', 'Foundation'
 
   # Privacy manifest for App Store compliance
-  s.resource_bundles = {'v_video_compressor_privacy' => ['Resources/PrivacyInfo.xcprivacy']}
+  s.resource_bundles = {
+    'v_video_compressor_privacy' => [
+      'v_video_compressor/Sources/v_video_compressor/PrivacyInfo.xcprivacy'
+    ]
+  }
 end

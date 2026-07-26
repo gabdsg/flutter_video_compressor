@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **v_video_compressor** is a professional Flutter plugin for high-quality video compression with real-time progress tracking and thumbnail generation. The plugin uses native platform APIs (Media3 for Android, AVFoundation for iOS) rather than ffmpeg for optimal performance and smaller app size.
 
-**Version**: 1.2.1
-**Platforms**: Android (API 21+), iOS (11.0+)
+**Version**: 2.1.0
+**Platforms**: Android (API 21+), iOS (12.0+)
 **Key Features**: Multi-quality compression, real-time progress, global progress stream, thumbnail generation, batch processing
 
 ## Architecture
@@ -30,7 +30,7 @@ The plugin follows Flutter's platform channel pattern with three layers:
    - `VVideoMediaLoader.kt` - Video metadata extraction
    - `VVideoModels.kt` - Kotlin data classes mirroring Dart models
 
-3. **iOS Native** (`ios/Classes/`):
+3. **iOS Native** (`ios/v_video_compressor/Sources/v_video_compressor/`):
    - `VVideoCompressorPlugin.swift` - MethodChannel handler
    - `VVideoCompressionEngine.swift` - Core compression using AVFoundation
    - `VVideoMediaLoader.swift` - Video metadata extraction
@@ -100,7 +100,7 @@ cd example/ios
 pod install
 
 # Compile iOS code (requires macOS)
-cd ../..
+cd ..
 flutter build ios --no-codesign
 ```
 
@@ -149,7 +149,7 @@ When modifying data models, update **all three**:
 
 1. `lib/src/v_video_models.dart` - Dart model with `toMap()`/`fromMap()`
 2. `android/.../VVideoModels.kt` - Kotlin data class with `toMap()`/`fromMap()`
-3. `ios/Classes/VVideoModels.swift` - Swift struct with dictionary conversion
+3. `ios/v_video_compressor/Sources/v_video_compressor/VVideoModels.swift` - Swift struct with dictionary conversion
 
 **Example**: Adding a new compression parameter requires:
 - Add to `VVideoAdvancedConfig` in all three files
@@ -252,15 +252,15 @@ The `example/` app demonstrates all features:
 ### Adding a Compression Parameter
 1. `lib/src/v_video_models.dart` → `VVideoAdvancedConfig`
 2. `android/.../VVideoModels.kt` → `VVideoAdvancedConfig`
-3. `ios/Classes/VVideoModels.swift` → `VVideoAdvancedConfig`
+3. `ios/v_video_compressor/Sources/v_video_compressor/VVideoModels.swift` → `VVideoAdvancedConfig`
 4. `android/.../VVideoCompressionEngine.kt` → Apply parameter
-5. `ios/Classes/VVideoCompressionEngine.swift` → Apply parameter
+5. `ios/v_video_compressor/Sources/v_video_compressor/VVideoCompressionEngine.swift` → Apply parameter
 
 ### Modifying Progress Tracking
 1. `lib/src/v_video_stream_manager.dart` → Stream management
 2. `lib/src/v_video_models.dart` → `VVideoProgressEvent`
 3. `android/.../VVideoCompressorPlugin.kt` → EventChannel emission
-4. `ios/Classes/VVideoCompressorPlugin.swift` → EventChannel emission
+4. `ios/v_video_compressor/Sources/v_video_compressor/VVideoCompressorPlugin.swift` → EventChannel emission
 
 ### Changing Compression Engine Logic
 - **Android**: `VVideoCompressionEngine.kt` → `compressVideo()` method

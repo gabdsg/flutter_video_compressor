@@ -16,11 +16,14 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.Effects
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
 import java.io.File
+import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.roundToLong
@@ -79,7 +82,7 @@ data class CpuAnalysisResult(
 /**
  * Enhanced compression engine with real-time progress tracking and cancellation support
  */
-@OptIn(UnstableApi::class)
+@UnstableApi
 class VVideoCompressionEngine(private val context: Context) {
     
     private var transformer: Transformer? = null
@@ -149,6 +152,7 @@ class VVideoCompressionEngine(private val context: Context) {
         private const val MIN_CPU_CORES_FOR_4K = 4 // Minimum 4 CPU cores for 4K
         private const val MIN_CPU_FREQUENCY_MHZ = 1500 // Minimum 1.5GHz CPU frequency
         private const val MIN_AVAILABLE_MEMORY_MB = 1000 // Minimum 1GB available memory
+        private const val LOG_TAG = "VVideoCompressor"
         
         // 4K FIX: Performance benchmark thresholds
         private const val PERFORMANCE_TEST_ITERATIONS = 1000
@@ -670,13 +674,37 @@ class VVideoCompressionEngine(private val context: Context) {
             errorMessage.contains(pattern) || stackTrace.contains(pattern)
         }
     }
+
+    private fun formatExportError(
+        error: ExportException,
+        outputDirectory: File
+    ): String {
+        val causeMessages = generateSequence<Throwable>(error) { it.cause }
+            .map { it.message ?: it.javaClass.simpleName }
+            .toList()
+        val availableStorageBytes = runCatching {
+            StatFs(outputDirectory.path).availableBytes
+        }.getOrNull()
+        val deviceDescription =
+            "${Build.MANUFACTURER} ${Build.MODEL} " +
+                "(Android ${Build.VERSION.RELEASE}, API ${Build.VERSION.SDK_INT})"
+
+        return VVideoExportError.format(
+            errorCode = error.errorCode,
+            errorCodeName = error.errorCodeName,
+            causeMessages = causeMessages,
+            codecInfo = error.codecInfo?.toString(),
+            availableStorageBytes = availableStorageBytes,
+            deviceDescription = deviceDescription
+        )
+    }
     
     /**
      * Callback interface for compression events
      */
     interface CompressionCallback {
         fun onProgress(progress: Float)
-        fun onComplete(result: VVideoCompressionResult)
+        fun onComplete(compressionResult: VVideoCompressionResult)
         fun onError(error: String)
     }
     
@@ -825,7 +853,10 @@ class VVideoCompressionEngine(private val context: Context) {
     /**
      * Checks if there's enough memory and storage to perform compression
      */
-    private fun hasEnoughResources(videoInfo: VVideoInfo): Boolean {
+    private fun hasEnoughResources(
+        videoInfo: VVideoInfo,
+        outputDirectory: File
+    ): Boolean {
         // Check available memory
         activityManager.getMemoryInfo(memoryInfo)
         val availableMemoryMB = memoryInfo.availMem / (1024 * 1024)
@@ -834,15 +865,13 @@ class VVideoCompressionEngine(private val context: Context) {
         }
         
         // Check available storage
-        val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
-        if (outputDir != null) {
-            val stat = StatFs(outputDir.path)
-            val availableStorageMB = (stat.availableBytes / (1024 * 1024))
-            // Need at least the video size + buffer
-            val requiredStorageMB = (videoInfo.fileSizeBytes / (1024 * 1024)) + MIN_STORAGE_THRESHOLD_MB
-            if (availableStorageMB < requiredStorageMB) {
-                return false
-            }
+        val stat = StatFs(outputDirectory.path)
+        val availableStorageMB = stat.availableBytes / (1024 * 1024)
+        // Need at least the video size + buffer.
+        val requiredStorageMB =
+            (videoInfo.fileSizeBytes / (1024 * 1024)) + MIN_STORAGE_THRESHOLD_MB
+        if (availableStorageMB < requiredStorageMB) {
+            return false
         }
         
         return true
@@ -856,18 +885,37 @@ class VVideoCompressionEngine(private val context: Context) {
         config: VVideoCompressionConfig,
         callback: CompressionCallback
     ) {
+        val inputFile = File(videoInfo.path)
+        if (!inputFile.isFile || !inputFile.canRead() || inputFile.length() <= 0L) {
+            callback.onError("The input video is missing, empty, or unreadable")
+            return
+        }
+
+        val outputDirectory = try {
+            prepareOutputDirectory(config.outputPath)
+        } catch (error: IOException) {
+            callback.onError(error.message ?: "The output directory is unavailable")
+            return
+        }
+
         // Check resources before starting
-        if (!hasEnoughResources(videoInfo)) {
+        if (!hasEnoughResources(videoInfo, outputDirectory)) {
             callback.onError("Insufficient memory or storage available for compression")
             return
         }
         
         // 4K FIX: Start with optimized quality based on device capabilities
         val optimalQuality = getOptimalQuality(videoInfo.width, videoInfo.height, config.quality)
-        var currentConfig = config.copy(quality = optimalQuality)
+        val currentConfig = config.copy(quality = optimalQuality)
         
         // 4K FIX: Retry compression with progressively lower quality on failure
-        compressVideoWithRetry(videoInfo, currentConfig, callback, retryCount = 0)
+        compressVideoWithRetry(
+            videoInfo,
+            currentConfig,
+            outputDirectory,
+            callback,
+            retryCount = 0
+        )
     }
     
     /**
@@ -876,10 +924,11 @@ class VVideoCompressionEngine(private val context: Context) {
     private fun compressVideoWithRetry(
         videoInfo: VVideoInfo,
         config: VVideoCompressionConfig,
+        outputDirectory: File,
         callback: CompressionCallback,
         retryCount: Int
     ) {
-        val outputFile = createOutputFile(config.outputPath, videoInfo, config.quality)
+        val outputFile = createOutputFile(outputDirectory, videoInfo, config.quality)
         val startTime = System.currentTimeMillis()
         
         // Reset cancellation state and clear caches
@@ -900,6 +949,9 @@ class VVideoCompressionEngine(private val context: Context) {
             
             // Configure transformer with advanced settings
             val transformerBuilder = Transformer.Builder(context)
+                // Avoid device-specific android.media.MediaMuxer failures by
+                // using Media3's in-app MP4 writer.
+                .setMuxerFactory(InAppMp4Muxer.Factory())
             
             // 4K FIX: Enhanced codec selection with device capability consideration
             val videoMimeType = selectOptimalVideoCodec(videoInfo, config)
@@ -960,8 +1012,11 @@ class VVideoCompressionEngine(private val context: Context) {
                         val originalSizeBytes = videoInfo.fileSizeBytes
                         val compressionRatio = compressedSizeBytes.toFloat() / originalSizeBytes
 
-                        // If compression didn't save space (>= 95% of original), use original instead
-                        val finalFile = if (compressionRatio >= 0.95f) {
+                        // Preserve the historical fallback unless the caller needs
+                        // the encoded output to guarantee its codec or container.
+                        val usedOriginalFile =
+                            config.fallbackToOriginalIfNotSmaller && compressionRatio >= 0.95f
+                        val finalFile = if (usedOriginalFile) {
                             println("Issue #7: Compressed file (${compressedSizeBytes}B) is too close to original (${originalSizeBytes}B). Using original.")
                             try {
                                 outputFile.delete()
@@ -977,7 +1032,8 @@ class VVideoCompressionEngine(private val context: Context) {
                             originalVideo = videoInfo,
                             compressedFile = finalFile,
                             quality = config.quality,
-                            timeTaken = timeTaken
+                            timeTaken = timeTaken,
+                            usedOriginalFile = usedOriginalFile
                         )
 
                         // Handle post-compression tasks
@@ -1006,12 +1062,32 @@ class VVideoCompressionEngine(private val context: Context) {
                             // Ignore cleanup errors
                         }
                         
-                        // 4K FIX: Check if this is a codec capacity error and retry if possible
-                        if (retryCount < MAX_COMPRESSION_RETRIES && isCodecCapacityError(exportException)) {
-                            val nextQuality = getNextLowerQuality(config.quality)
+                        val codecCapacityError = isCodecCapacityError(exportException)
+                        val shouldRetry = VVideoExportError.shouldRetry(
+                            errorCode = exportException.errorCode,
+                            isCodecCapacityError = codecCapacityError,
+                            retryCount = retryCount,
+                            maxRetries = MAX_COMPRESSION_RETRIES
+                        )
+                        if (shouldRetry) {
+                            val isMuxerError =
+                                VVideoExportError.isMuxerError(exportException.errorCode)
+                            val nextQuality = if (isMuxerError) {
+                                config.quality
+                            } else {
+                                getNextLowerQuality(config.quality)
+                            }
                             if (nextQuality != null) {
-                                val retryMessage = "Codec capacity issue detected. Retrying with lower quality (${nextQuality.displayName})"
-                                println("4K FIX: $retryMessage")
+                                val failureType = if (isMuxerError) {
+                                    "MP4 muxer failure"
+                                } else {
+                                    "Codec capacity issue"
+                                }
+                                Log.w(
+                                    LOG_TAG,
+                                    "$failureType detected; retrying with ${nextQuality.displayName}",
+                                    exportException
+                                )
                                 
                                 // Notify about the retry attempt
                                 mainHandler.post {
@@ -1019,32 +1095,19 @@ class VVideoCompressionEngine(private val context: Context) {
                                 }
                                 
                                 val retryConfig = config.copy(quality = nextQuality)
-                                compressVideoWithRetry(videoInfo, retryConfig, callback, retryCount + 1)
+                                compressVideoWithRetry(
+                                    videoInfo,
+                                    retryConfig,
+                                    outputDirectory,
+                                    callback,
+                                    retryCount + 1
+                                )
                                 return
                             }
                         }
                         
-                        // Improved error handling with device capability details
-                        val detailedError = when (exportException.errorCode) {
-                            ExportException.ERROR_CODE_FAILED_RUNTIME_CHECK ->
-                                "Video format not supported"
-                            ExportException.ERROR_CODE_IO_FILE_NOT_FOUND ->
-                                "Video file not found"
-                            ExportException.ERROR_CODE_ENCODER_INIT_FAILED -> {
-                                val deviceReport = buildDeviceCapabilityReport()
-                                "Failed to initialize video encoder.\n\n$deviceReport"
-                            }
-                            else -> {
-                                // For codec capacity errors, include device info
-                                if (isCodecCapacityError(exportException)) {
-                                    val deviceReport = buildDeviceCapabilityReport()
-                                    "Video compression failed - codec capacity exceeded.\n\n$deviceReport"
-                                } else {
-                                    exportException.message ?: "Unknown compression error"
-                                }
-                            }
-                        }
-
+                        val detailedError = formatExportError(exportException, outputDirectory)
+                        Log.e(LOG_TAG, detailedError, exportException)
                         callback.onError(detailedError)
                     }
                 })
@@ -1058,28 +1121,56 @@ class VVideoCompressionEngine(private val context: Context) {
             
         } catch (e: Exception) {
             stopProgressTracking()
+            outputFile.delete()
 
-            // 4K FIX: Check if this is a codec capacity error and retry if possible
-            if (retryCount < MAX_COMPRESSION_RETRIES && isCodecCapacityError(e)) {
-                val nextQuality = getNextLowerQuality(config.quality)
+            val codecCapacityError = isCodecCapacityError(e)
+            val shouldRetry = if (e is ExportException) {
+                VVideoExportError.shouldRetry(
+                    errorCode = e.errorCode,
+                    isCodecCapacityError = codecCapacityError,
+                    retryCount = retryCount,
+                    maxRetries = MAX_COMPRESSION_RETRIES
+                )
+            } else {
+                retryCount < MAX_COMPRESSION_RETRIES && codecCapacityError
+            }
+            if (shouldRetry) {
+                val isMuxerError =
+                    e is ExportException && VVideoExportError.isMuxerError(e.errorCode)
+                val nextQuality = if (isMuxerError) {
+                    config.quality
+                } else {
+                    getNextLowerQuality(config.quality)
+                }
                 if (nextQuality != null) {
-                    val retryMessage = "Codec initialization failed. Retrying with lower quality (${nextQuality.displayName})"
-                    println("4K FIX: $retryMessage")
+                    Log.w(
+                        LOG_TAG,
+                        "Export initialization failed; retrying with ${nextQuality.displayName}",
+                        e
+                    )
 
                     val retryConfig = config.copy(quality = nextQuality)
-                    compressVideoWithRetry(videoInfo, retryConfig, callback, retryCount + 1)
+                    compressVideoWithRetry(
+                        videoInfo,
+                        retryConfig,
+                        outputDirectory,
+                        callback,
+                        retryCount + 1
+                    )
                     return
                 }
             }
 
-            // Enhanced error message with device capabilities
-            val errorMessage = if (isCodecCapacityError(e)) {
+            val errorMessage = if (e is ExportException) {
+                formatExportError(e, outputDirectory)
+            } else if (codecCapacityError) {
                 val deviceReport = buildDeviceCapabilityReport()
                 "Compression failed - ${e.message ?: "codec error"}.\n\n$deviceReport"
             } else {
-                e.message ?: "Failed to start compression"
+                "Failed to start compression: ${e.message ?: e.javaClass.simpleName}"
             }
 
+            Log.e(LOG_TAG, errorMessage, e)
             callback.onError(errorMessage)
         }
     }
@@ -1619,23 +1710,40 @@ class VVideoCompressionEngine(private val context: Context) {
     }
     
     /**
-     * Creates output file for compressed video
+     * Resolves and validates the directory used by Media3's muxer.
+     */
+    @Throws(IOException::class)
+    private fun prepareOutputDirectory(outputPath: String?): File {
+        val directory = if (!outputPath.isNullOrBlank()) {
+            File(outputPath)
+        } else {
+            val moviesDirectory =
+                context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+                    ?: File(context.filesDir, "Movies")
+            File(moviesDirectory, "CompressedVideos")
+        }
+
+        if (directory.exists() && !directory.isDirectory) {
+            throw IOException("The configured output path is not a directory")
+        }
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw IOException("Could not create the configured output directory")
+        }
+        if (!directory.canWrite()) {
+            throw IOException("The configured output directory is not writable")
+        }
+
+        return directory.canonicalFile
+    }
+
+    /**
+     * Creates a unique output path for each attempt.
      */
     private fun createOutputFile(
-        outputPath: String?,
+        outputDirectory: File,
         video: VVideoInfo,
         quality: VVideoCompressQuality
     ): File {
-        val outputDirectory = if (outputPath != null) {
-            File(outputPath).apply { 
-                if (!exists()) mkdirs() 
-            }
-        } else {
-            File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "CompressedVideos").apply {
-                if (!exists()) mkdirs()
-            }
-        }
-        
         val qualitySuffix = when (quality) {
             VVideoCompressQuality.HIGH -> "1080p"
             VVideoCompressQuality.MEDIUM -> "720p"
@@ -1643,9 +1751,14 @@ class VVideoCompressionEngine(private val context: Context) {
             VVideoCompressQuality.VERY_LOW -> "360p"
             VVideoCompressQuality.ULTRA_LOW -> "240p"
         }
-        
-        val timestamp = System.currentTimeMillis()
-        val filename = "compressed_${video.name.substringBeforeLast('.')}_${qualitySuffix}_$timestamp.mp4"
+
+        val safeBaseName = video.name
+            .substringBeforeLast('.')
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .take(80)
+            .ifBlank { "video" }
+        val filename =
+            "compressed_${safeBaseName}_${qualitySuffix}_${UUID.randomUUID()}.mp4"
         return File(outputDirectory, filename)
     }
     
@@ -1656,7 +1769,8 @@ class VVideoCompressionEngine(private val context: Context) {
         originalVideo: VVideoInfo,
         compressedFile: File,
         quality: VVideoCompressQuality,
-        timeTaken: Long
+        timeTaken: Long,
+        usedOriginalFile: Boolean
     ): VVideoCompressionResult {
         val originalSizeBytes = originalVideo.fileSizeBytes
         val compressedSizeBytes = compressedFile.length()
@@ -1677,7 +1791,8 @@ class VVideoCompressionEngine(private val context: Context) {
             quality = quality,
             originalResolution = originalResolution,
             compressedResolution = compressedResolution,
-            spaceSaved = spaceSaved
+            spaceSaved = spaceSaved,
+            usedOriginalFile = usedOriginalFile
         )
     }
     
@@ -2158,4 +2273,4 @@ class VVideoCompressionEngine(private val context: Context) {
             false
         }
     }
-} 
+}

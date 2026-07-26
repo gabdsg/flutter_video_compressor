@@ -13,13 +13,13 @@ void main() {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that the app title is displayed
-    expect(find.text('V Video Compressor Example'), findsOneWidget);
+    // Verify the title in both the app bar and the page header.
+    expect(find.text('V Video Compressor Example'), findsNWidgets(2));
 
-    // Verify that the video selection step is displayed
-    expect(find.text('Step 1: Select Video'), findsOneWidget);
+    // Verify the primary video-selection action is available.
+    expect(find.text('Pick Video from Gallery'), findsOneWidget);
 
-    // Verify that the select video button is displayed
-    expect(find.text('Select Video File'), findsOneWidget);
+    // Verify the dedicated 4K test route is discoverable.
+    expect(find.text('4K Test'), findsOneWidget);
   });
 }

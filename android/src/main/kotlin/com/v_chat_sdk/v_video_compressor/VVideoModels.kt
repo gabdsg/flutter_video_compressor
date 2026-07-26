@@ -219,6 +219,7 @@ data class VVideoCompressionConfig(
     val quality: VVideoCompressQuality,
     val outputPath: String? = null,
     val deleteOriginal: Boolean = false,
+    val fallbackToOriginalIfNotSmaller: Boolean = true,
     val advanced: VVideoAdvancedConfig? = null
 ) {
     companion object {
@@ -228,6 +229,8 @@ data class VVideoCompressionConfig(
                 quality = VVideoCompressQuality.fromString(map["quality"] as? String ?: "MEDIUM"),
                 outputPath = map["outputPath"] as? String,
                 deleteOriginal = map["deleteOriginal"] as? Boolean ?: false,
+                fallbackToOriginalIfNotSmaller =
+                    map["fallbackToOriginalIfNotSmaller"] as? Boolean ?: true,
                 advanced = VVideoAdvancedConfig.fromMap(map["advanced"] as? Map<String, Any?>)
             )
         }
@@ -267,7 +270,8 @@ data class VVideoCompressionResult(
     val quality: VVideoCompressQuality,
     val originalResolution: String,
     val compressedResolution: String,
-    val spaceSaved: Long
+    val spaceSaved: Long,
+    val usedOriginalFile: Boolean = false
 ) {
     val spaceSavedFormatted: String
         get() = formatFileSize(spaceSaved)
@@ -319,7 +323,8 @@ data class VVideoCompressionResult(
             "quality" to quality.value,
             "originalResolution" to originalResolution,
             "compressedResolution" to compressedResolution,
-            "spaceSaved" to spaceSaved
+            "spaceSaved" to spaceSaved,
+            "usedOriginalFile" to usedOriginalFile
         )
     }
 }
@@ -406,4 +411,4 @@ data class VVideoThumbnailResult(
             "timeMs" to timeMs
         )
     }
-} 
+}

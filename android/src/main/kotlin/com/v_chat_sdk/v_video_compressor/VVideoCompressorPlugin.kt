@@ -9,10 +9,10 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -162,25 +162,22 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
         val videoPath = call.argument<String>("videoPath")
         // Support both legacy parameters (quality, outputPath, etc.) and new consolidated 'config' map
         val configMapFromArgs = call.argument<Map<String, Any?>>("config")
-        val quality = when {
-            configMapFromArgs?.get("quality") is String -> configMapFromArgs["quality"] as String
-            else -> call.argument<String>("quality")
-        }
-        val advanced = when {
-            configMapFromArgs?.get("advanced") is Map<*, *> -> configMapFromArgs["advanced"] as Map<String, Any>
-            else -> call.arguments as? Map<String, Any>
-        }
-        val outputPathArg: String? = when {
-            configMapFromArgs?.get("outputPath") is String -> configMapFromArgs["outputPath"] as String
-            else -> call.argument("outputPath")
-        }
-        val deleteOriginalArg: Boolean = when {
-            configMapFromArgs?.get("deleteOriginal") is Boolean -> configMapFromArgs["deleteOriginal"] as Boolean
-            else -> call.argument<Boolean>("deleteOriginal") ?: false
+        val legacyQuality = call.argument<String>("quality")
+        val compressionConfig = configMapFromArgs?.let {
+            VVideoCompressionConfig.fromMap(it)
+        } ?: legacyQuality?.let {
+            VVideoCompressionConfig(
+                quality = VVideoCompressQuality.valueOf(it),
+                outputPath = call.argument("outputPath"),
+                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                fallbackToOriginalIfNotSmaller =
+                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
+            )
         }
         
-        if (videoPath == null || quality == null) {
-            result.error("INVALID_ARGUMENT", "Video path and quality are required", null)
+        if (videoPath == null || compressionConfig == null) {
+            result.error("INVALID_ARGUMENT", "Video path and config are required", null)
             return
         }
         
@@ -194,13 +191,6 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
                     result.error("VIDEO_NOT_FOUND", "Could not read video file", null)
                     return@launch
                 }
-                
-                val compressionConfig = VVideoCompressionConfig(
-                    quality = VVideoCompressQuality.valueOf(quality),
-                    outputPath = outputPathArg,
-                    deleteOriginal = deleteOriginalArg,
-                    advanced = parseAdvancedConfig(advanced)
-                )
                 
                 compressionEngine.compressVideo(
                     videoInfo = videoInfo,
@@ -238,11 +228,23 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
     
     private fun handleCompressVideos(call: MethodCall, result: Result) {
         val videoPaths = call.argument<List<String>>("videoPaths")
-        val quality = call.argument<String>("quality")
-        val advanced = call.arguments as? Map<String, Any>
+        val configMapFromArgs = call.argument<Map<String, Any?>>("config")
+        val legacyQuality = call.argument<String>("quality")
+        val compressionConfig = configMapFromArgs?.let {
+            VVideoCompressionConfig.fromMap(it)
+        } ?: legacyQuality?.let {
+            VVideoCompressionConfig(
+                quality = VVideoCompressQuality.valueOf(it),
+                outputPath = call.argument("outputPath"),
+                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                fallbackToOriginalIfNotSmaller =
+                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
+            )
+        }
         
-        if (videoPaths == null || quality == null || videoPaths.isEmpty()) {
-            result.error("INVALID_ARGUMENT", "Video paths and quality are required", null)
+        if (videoPaths == null || compressionConfig == null || videoPaths.isEmpty()) {
+            result.error("INVALID_ARGUMENT", "Video paths and config are required", null)
             return
         }
         
@@ -267,57 +269,35 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
                         continue
                     }
                     
-                    val compressionConfig = VVideoCompressionConfig(
-                        quality = VVideoCompressQuality.valueOf(quality),
-                        outputPath = call.argument<String>("outputPath"),
-                        deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
-                        advanced = parseAdvancedConfig(advanced)
-                    )
-                    
-                    val compressionResult = withContext(Dispatchers.IO) {
-                        var compressionResult: VVideoCompressionResult? = null
-                        var compressionError: String? = null
-                        
-                        compressionEngine.compressVideo(
-                            videoInfo = videoInfo,
-                            config = compressionConfig,
-                            callback = object : VVideoCompressionEngine.CompressionCallback {
-                                override fun onProgress(progress: Float) {
-                                    mainHandler.post {
-                                        eventSink?.success(mapOf(
-                                            "progress" to progress,
-                                            "videoPath" to videoPath,
-                                            "currentIndex" to index,
-                                            "total" to videoPaths.size
-                                        ))
-                                    }
-                                }
-                                
-                                override fun onComplete(result: VVideoCompressionResult) {
-                                    compressionResult = result
-                                }
-                                
-                                override fun onError(error: String) {
-                                    compressionError = error
-                                }
+                    val completion = CompletableDeferred<Map<String, Any?>>()
+                    compressionEngine.compressVideo(
+                        videoInfo = videoInfo,
+                        config = compressionConfig,
+                        callback = object : VVideoCompressionEngine.CompressionCallback {
+                            override fun onProgress(progress: Float) {
+                                eventSink?.success(mapOf(
+                                    "progress" to progress,
+                                    "videoPath" to videoPath,
+                                    "currentIndex" to index,
+                                    "total" to videoPaths.size
+                                ))
                             }
-                        )
-                        
-                        // Wait for completion (simplified - in production you'd use proper synchronization)
-                        while (compressionResult == null && compressionError == null && compressionEngine.isCompressing()) {
-                            delay(100)
+
+                            override fun onComplete(compressionResult: VVideoCompressionResult) {
+                                completion.complete(compressionResult.toMap())
+                            }
+
+                            override fun onError(error: String) {
+                                completion.complete(mapOf(
+                                    "success" to false,
+                                    "error" to error,
+                                    "videoPath" to videoPath
+                                ))
+                            }
                         }
-                        
-                        if (compressionResult != null) {
-                            compressionResult!!.toMap()
-                        } else {
-                            mapOf(
-                                "success" to false,
-                                "error" to (compressionError ?: "Unknown error"),
-                                "videoPath" to videoPath
-                            )
-                        }
-                    }
+                    )
+
+                    val compressionResult = completion.await()
                     
                     results.add(compressionResult)
                 } catch (e: OutOfMemoryError) {
@@ -351,7 +331,9 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
     
     private fun handleGetVideoThumbnail(call: MethodCall, result: Result) {
         val videoPath = call.argument<String>("videoPath")
-        val thumbnailConfig = call.arguments as? Map<String, Any>
+        val arguments = toStringKeyMap(call.arguments)
+        val thumbnailConfig =
+            toStringKeyMap(arguments?.get("config")) ?: arguments
         
         if (videoPath == null) {
             result.error("INVALID_ARGUMENT", "Video path is required", null)
@@ -487,7 +469,7 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
     }
     
     // Helper methods for parsing configuration
-    private fun parseAdvancedConfig(map: Map<String, Any>?): VVideoAdvancedConfig? {
+    private fun parseAdvancedConfig(map: Map<String, Any?>?): VVideoAdvancedConfig? {
         if (map == null) return null
         
         return VVideoAdvancedConfig(
@@ -515,7 +497,7 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
         )
     }
     
-    private fun parseThumbnailConfig(map: Map<String, Any>?): VVideoThumbnailConfig {
+    private fun parseThumbnailConfig(map: Map<String, Any?>?): VVideoThumbnailConfig {
         return VVideoThumbnailConfig(
             timeMs = (map?.get("timeMs") as? Number)?.toInt() ?: 0,
             maxWidth = (map?.get("maxWidth") as? Number)?.toInt(),
@@ -526,5 +508,14 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
             } ?: VThumbnailFormat.JPEG,
             outputPath = map?.get("outputPath") as? String
         )
+    }
+
+    private fun toStringKeyMap(value: Any?): Map<String, Any?>? {
+        val map = value as? Map<*, *> ?: return null
+        return buildMap {
+            map.forEach { (key, item) ->
+                if (key is String) put(key, item)
+            }
+        }
     }
 }

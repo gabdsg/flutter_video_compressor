@@ -228,6 +228,7 @@ struct VVideoCompressionConfig {
     let quality: VVideoCompressQuality
     let outputPath: String?
     let deleteOriginal: Bool
+    let fallbackToOriginalIfNotSmaller: Bool
     let advanced: VVideoAdvancedConfig?
     
     static func fromMap(_ map: [String: Any]) -> VVideoCompressionConfig {
@@ -235,6 +236,7 @@ struct VVideoCompressionConfig {
             quality: VVideoCompressQuality.fromString(map["quality"] as? String),
             outputPath: map["outputPath"] as? String,
             deleteOriginal: map["deleteOriginal"] as? Bool ?? false,
+            fallbackToOriginalIfNotSmaller: map["fallbackToOriginalIfNotSmaller"] as? Bool ?? true,
             advanced: VVideoAdvancedConfig.fromMap(map["advanced"] as? [String: Any])
         )
     }
@@ -272,6 +274,7 @@ struct VVideoCompressionResult {
     let originalResolution: String
     let compressedResolution: String
     let spaceSaved: Int64
+    let usedOriginalFile: Bool
     
     var spaceSavedFormatted: String {
         return formatFileSize(spaceSaved)
@@ -331,7 +334,8 @@ struct VVideoCompressionResult {
             "quality": quality.rawValue,
             "originalResolution": originalResolution,
             "compressedResolution": compressedResolution,
-            "spaceSaved": spaceSaved
+            "spaceSaved": spaceSaved,
+            "usedOriginalFile": usedOriginalFile
         ]
     }
 }
@@ -429,4 +433,4 @@ struct VVideoThumbnailResult {
             "timeMs": timeMs
         ]
     }
-} 
+}

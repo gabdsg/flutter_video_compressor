@@ -273,7 +273,7 @@ public class VVideoCompressorPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
 
 // MARK: - Compression Callback Implementation
 
-private class CompressionCallbackImpl: VVideoCompressionEngine.CompressionCallback {
+private class CompressionCallbackImpl: VVideoCompressionCallback {
   private let onProgressCallback: (Float) -> Void
   private let onCompleteCallback: (VVideoCompressionResult) -> Void
   private let onErrorCallback: (String) -> Void

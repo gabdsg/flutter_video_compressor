@@ -2,6 +2,12 @@ import Foundation
 import AVFoundation
 import UIKit
 
+protocol VVideoCompressionCallback: AnyObject {
+    func onProgress(_ progress: Float)
+    func onComplete(_ result: VVideoCompressionResult)
+    func onError(_ error: String)
+}
+
 class VVideoCompressionEngine {
     
     // Improved constants from iOS Quick Fix
@@ -17,13 +23,7 @@ class VVideoCompressionEngine {
     // Removed background task - keeping it simple for now
     
     deinit {
-        cleanup()
-    }
-    
-    protocol CompressionCallback: AnyObject {
-        func onProgress(_ progress: Float)
-        func onComplete(_ result: VVideoCompressionResult)
-        func onError(_ error: String)
+        _ = cleanup()
     }
     
     func getVideoInfo(_ videoPath: String, completion: @escaping (VVideoInfo?) -> Void) {
@@ -124,7 +124,7 @@ class VVideoCompressionEngine {
         }
     }
     
-    func compressVideo(_ videoInfo: VVideoInfo, config: VVideoCompressionConfig, callback: CompressionCallback) {
+    func compressVideo(_ videoInfo: VVideoInfo, config: VVideoCompressionConfig, callback: VVideoCompressionCallback) {
         // Validate inputs
         guard validateCompressionInputs(videoInfo: videoInfo, config: config) else {
             callback.onError("Invalid compression parameters")
@@ -360,7 +360,7 @@ class VVideoCompressionEngine {
         startTime: Double,
         videoInfo: VVideoInfo,
         config: VVideoCompressionConfig,
-        callback: CompressionCallback
+        callback: VVideoCompressionCallback
     ) {
         stopProgressTracking()
         isCompressionActive = false
@@ -388,9 +388,11 @@ class VVideoCompressionEngine {
             let originalSizeBytes = videoInfo.fileSizeBytes
             let compressionRatio = Float(compressedSizeBytes) / Float(originalSizeBytes)
 
-            // If compression didn't save space (>= 95% of original), use original instead
+            // Preserve the historical fallback unless the caller needs the
+            // encoded output to guarantee its codec or container.
+            let usedOriginalFile = config.fallbackToOriginalIfNotSmaller && compressionRatio >= 0.95
             let finalURL: URL
-            if compressionRatio >= 0.95 {
+            if usedOriginalFile {
                 print("VVideoCompressionEngine: Issue #7 - Compressed file (\(compressedSizeBytes)B) is too close to original (\(originalSizeBytes)B). Using original.")
                 try? FileManager.default.removeItem(at: outputURL)
                 guard let inputURL = createURL(from: videoInfo.path) else {
@@ -406,7 +408,8 @@ class VVideoCompressionEngine {
                 originalVideo: videoInfo,
                 compressedFile: finalURL,
                 quality: config.quality,
-                timeTaken: timeTaken
+                timeTaken: timeTaken,
+                usedOriginalFile: usedOriginalFile
             )
 
             callback.onComplete(result)
@@ -528,7 +531,7 @@ class VVideoCompressionEngine {
         }
     }
     
-    private func startProgressTracking(callback: CompressionCallback) {
+    private func startProgressTracking(callback: VVideoCompressionCallback) {
         progressTimer = Timer.scheduledTimer(withTimeInterval: Self.PROGRESS_UPDATE_INTERVAL, repeats: true) { _ in
             guard let exportSession = self.exportSession, !self.isCancelled else { return }
             callback.onProgress(exportSession.progress)
@@ -563,7 +566,8 @@ class VVideoCompressionEngine {
         originalVideo: VVideoInfo,
         compressedFile: URL,
         quality: VVideoCompressQuality,
-        timeTaken: Int64
+        timeTaken: Int64,
+        usedOriginalFile: Bool
     ) -> VVideoCompressionResult {
         let compressedSizeBytes = getFileSize(for: compressedFile)
         let compressionRatio = Float(compressedSizeBytes) / Float(originalVideo.fileSizeBytes)
@@ -583,7 +587,8 @@ class VVideoCompressionEngine {
             quality: quality,
             originalResolution: originalResolution,
             compressedResolution: compressedResolution,
-            spaceSaved: spaceSaved
+            spaceSaved: spaceSaved,
+            usedOriginalFile: usedOriginalFile
         )
     }
     
