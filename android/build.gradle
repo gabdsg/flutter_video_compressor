@@ -2,14 +2,14 @@ group = "com.v_chat_sdk.v_video_compressor"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "2.1.0"
+    ext.kotlin_version = "2.2.20"
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:8.7.3")
+        classpath("com.android.tools.build:gradle:8.11.1")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
@@ -27,7 +27,7 @@ apply plugin: "kotlin-android"
 android {
     namespace = "com.v_chat_sdk.v_video_compressor"
 
-    compileSdk = 35
+    compileSdk = 36
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -51,9 +51,13 @@ android {
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
         
-        // Media3 dependencies for video compression - only what we need
-        implementation("androidx.media3:media3-transformer:1.4.1")
-        implementation("androidx.media3:media3-common:1.4.1")
+        // Media3 1.8 is the newest stable line that preserves API 21 support.
+        // All Media3 modules must use the same version.
+        def media3Version = "1.8.0"
+        implementation("androidx.media3:media3-transformer:$media3Version")
+        implementation("androidx.media3:media3-common:$media3Version")
+        implementation("androidx.media3:media3-effect:$media3Version")
+        implementation("androidx.media3:media3-muxer:$media3Version")
         
         // Essential Android dependencies
         implementation("androidx.core:core-ktx:1.15.0")
