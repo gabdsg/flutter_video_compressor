@@ -39,7 +39,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  v_video_compressor: ^1.2.0
+  v_video_compressor: ^2.1.0
   file_picker: ^8.0.0 # For video selection
   # OR
   image_picker: ^1.0.7 # Alternative for video selection
@@ -820,12 +820,13 @@ Video compression is memory-intensive. For production apps, please read our [Mem
 
 ## 🤝 **Contributing**
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+We welcome contributions! Please see the [repository guidelines](AGENTS.md) for
+the project layout, validation commands, and pull request expectations.
 
 ### Development Setup
 
 ```bash
-git clone https://github.com/your-repo/v_video_compressor.git
+git clone https://github.com/v-chat-sdk/v_video_compressor.git
 cd v_video_compressor
 flutter pub get
 cd example && flutter pub get
@@ -835,17 +836,10 @@ cd example && flutter pub get
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🔮 **Roadmap**
-
-- **1.1.0**: Enhanced progress algorithms and additional presets
-- **1.2.0**: Video filtering and advanced effects
-- **1.3.0**: Cloud storage integration helpers
-- **2.0.0**: Performance improvements with breaking changes
-
 ## 📞 **Support**
 
-- **Issues**: [GitHub Issues](https://github.com/your-repo/v_video_compressor/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/v_video_compressor/discussions)
+- **Issues**: [GitHub Issues](https://github.com/v-chat-sdk/v_video_compressor/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/v-chat-sdk/v_video_compressor/discussions)
 - **Documentation**: [pub.dev](https://pub.dev/packages/v_video_compressor)
 
 ---

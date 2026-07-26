@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **v_video_compressor** is a professional Flutter plugin for high-quality video compression with real-time progress tracking and thumbnail generation. The plugin uses native platform APIs (Media3 for Android, AVFoundation for iOS) rather than ffmpeg for optimal performance and smaller app size.
 
-**Version**: 1.2.1
-**Platforms**: Android (API 21+), iOS (11.0+)
+**Version**: 2.1.0
+**Platforms**: Android (API 21+), iOS (12.0+)
 **Key Features**: Multi-quality compression, real-time progress, global progress stream, thumbnail generation, batch processing
 
 ## Architecture
@@ -100,7 +100,7 @@ cd example/ios
 pod install
 
 # Compile iOS code (requires macOS)
-cd ../..
+cd ..
 flutter build ios --no-codesign
 ```
 

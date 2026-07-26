@@ -1,3 +1,26 @@
+## [2.1.0] - 2026-07-27
+
+### Added
+
+- Swift Package Manager support alongside the existing CocoaPods integration.
+- `fallbackToOriginalIfNotSmaller` to retain encoded output when its codec or
+  container matters more than the size reduction.
+- `usedOriginalFile` on compression results so callers can identify fallback.
+
+### Fixed
+
+- Restored compatibility with Swift compilers before 5.10.
+- Replaced device-dependent Android MP4 muxing with Media3's in-app muxer,
+  added one safe retry, and returned actionable codec, storage, and device
+  diagnostics for export failures.
+- Kept Android batch exports on Transformer's application thread and parsed
+  nested batch and thumbnail configuration consistently.
+- Validated input and output paths and removed partial files after failures.
+- Updated the example to Gradle 8.14.3, Android Gradle Plugin 8.11.1,
+  Kotlin 2.2.20, compile SDK 36, and NDK 28.2.
+
+This release remains compatible with Android API 21+ and iOS 12.0+.
+
 ## [1.3.0] - 2025-11-22 🎯 **Dimension Alignment & Edge Artifact Fix**
 
 ### ✨ **New Features**
