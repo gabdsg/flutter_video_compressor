@@ -359,6 +359,23 @@ final result = await _compressor.compressVideo(
 );
 ```
 
+### Guarantee an Encoded Output
+
+By default, the plugin returns the original file when encoding saves less than
+5% to avoid wasting storage. Disable that fallback when the requested codec or
+container is required:
+
+```dart
+final result = await _compressor.compressVideo(
+  videoPath,
+  const VVideoCompressionConfig.medium(
+    fallbackToOriginalIfNotSmaller: false,
+  ),
+);
+
+print('Original returned: ${result?.usedOriginalFile}');
+```
+
 ### ID-Based Compression Tracking
 
 Track compression operations with custom IDs for better monitoring:

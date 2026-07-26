@@ -575,6 +575,30 @@ void main() {
     });
 
     group('Data Model Tests', () {
+      test('compression fallback remains enabled for legacy configurations',
+          () {
+        final config = VVideoCompressionConfig.fromMap({
+          'quality': VVideoCompressQuality.medium.value,
+        });
+
+        expect(config.fallbackToOriginalIfNotSmaller, isTrue);
+        expect(
+          const VVideoCompressionConfig.medium()
+              .toMap()['fallbackToOriginalIfNotSmaller'],
+          isTrue,
+        );
+      });
+
+      test('compression fallback can be disabled and round-tripped', () {
+        const config = VVideoCompressionConfig.medium(
+          fallbackToOriginalIfNotSmaller: false,
+        );
+
+        final decoded = VVideoCompressionConfig.fromMap(config.toMap());
+
+        expect(decoded.fallbackToOriginalIfNotSmaller, isFalse);
+      });
+
       test('should format video info correctly', () {
         final info = VVideoInfo(
           path: '/path/to/video.mp4',
@@ -618,6 +642,41 @@ void main() {
         expect(result.compressedSizeFormatted, '25.0 MB');
         expect(result.spaceSavedFormatted, '25.0 MB');
         expect(result.timeTakenFormatted, '45s');
+      });
+
+      test('compression result reports when the original file was used', () {
+        final originalInfo = VVideoInfo(
+          path: '/path/to/video.mp4',
+          name: 'test_video.mp4',
+          fileSizeBytes: 1024,
+          durationMillis: 1000,
+          width: 100,
+          height: 100,
+        );
+        final result = VVideoCompressionResult(
+          originalVideo: originalInfo,
+          compressedFilePath: originalInfo.path,
+          originalSizeBytes: 1024,
+          compressedSizeBytes: 1024,
+          compressionRatio: 1,
+          timeTaken: 100,
+          quality: VVideoCompressQuality.medium,
+          originalResolution: '100x100',
+          compressedResolution: '100x100',
+          spaceSaved: 0,
+          usedOriginalFile: true,
+        );
+
+        expect(
+          VVideoCompressionResult.fromMap(result.toMap()).usedOriginalFile,
+          isTrue,
+        );
+
+        final legacyMap = result.toMap()..remove('usedOriginalFile');
+        expect(
+          VVideoCompressionResult.fromMap(legacyMap).usedOriginalFile,
+          isFalse,
+        );
       });
 
       test('should format thumbnail result correctly', () {

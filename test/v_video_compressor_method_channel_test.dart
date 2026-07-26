@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:v_video_compressor/v_video_compressor.dart';
 import 'package:v_video_compressor/v_video_compressor_method_channel.dart';
 
 void main() {
@@ -25,5 +26,46 @@ void main() {
 
   test('getPlatformVersion', () async {
     expect(await platform.getPlatformVersion(), '42');
+  });
+
+  test('compressVideo sends fallback option and decodes original-file flag',
+      () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (methodCall) async {
+      capturedCall = methodCall;
+      return {
+        'originalVideo': {
+          'path': '/input.mov',
+          'name': 'input.mov',
+          'fileSizeBytes': 100,
+          'durationMillis': 1000,
+          'width': 100,
+          'height': 100,
+        },
+        'compressedFilePath': '/input.mov',
+        'originalSizeBytes': 100,
+        'compressedSizeBytes': 100,
+        'compressionRatio': 1.0,
+        'timeTaken': 10,
+        'quality': 'MEDIUM',
+        'originalResolution': '100x100',
+        'compressedResolution': '100x100',
+        'spaceSaved': 0,
+        'usedOriginalFile': true,
+      };
+    });
+
+    final result = await platform.compressVideo(
+      '/input.mov',
+      const VVideoCompressionConfig.medium(
+        fallbackToOriginalIfNotSmaller: false,
+      ),
+    );
+
+    final arguments = capturedCall!.arguments as Map<Object?, Object?>;
+    final config = arguments['config'] as Map<Object?, Object?>;
+    expect(config['fallbackToOriginalIfNotSmaller'], isFalse);
+    expect(result!.usedOriginalFile, isTrue);
   });
 }

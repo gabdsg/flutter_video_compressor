@@ -162,25 +162,22 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
         val videoPath = call.argument<String>("videoPath")
         // Support both legacy parameters (quality, outputPath, etc.) and new consolidated 'config' map
         val configMapFromArgs = call.argument<Map<String, Any?>>("config")
-        val quality = when {
-            configMapFromArgs?.get("quality") is String -> configMapFromArgs["quality"] as String
-            else -> call.argument<String>("quality")
-        }
-        val advanced = when {
-            configMapFromArgs?.get("advanced") is Map<*, *> -> configMapFromArgs["advanced"] as Map<String, Any>
-            else -> call.arguments as? Map<String, Any>
-        }
-        val outputPathArg: String? = when {
-            configMapFromArgs?.get("outputPath") is String -> configMapFromArgs["outputPath"] as String
-            else -> call.argument("outputPath")
-        }
-        val deleteOriginalArg: Boolean = when {
-            configMapFromArgs?.get("deleteOriginal") is Boolean -> configMapFromArgs["deleteOriginal"] as Boolean
-            else -> call.argument<Boolean>("deleteOriginal") ?: false
+        val legacyQuality = call.argument<String>("quality")
+        val compressionConfig = configMapFromArgs?.let {
+            VVideoCompressionConfig.fromMap(it)
+        } ?: legacyQuality?.let {
+            VVideoCompressionConfig(
+                quality = VVideoCompressQuality.valueOf(it),
+                outputPath = call.argument("outputPath"),
+                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                fallbackToOriginalIfNotSmaller =
+                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                advanced = parseAdvancedConfig(call.arguments as? Map<String, Any>)
+            )
         }
         
-        if (videoPath == null || quality == null) {
-            result.error("INVALID_ARGUMENT", "Video path and quality are required", null)
+        if (videoPath == null || compressionConfig == null) {
+            result.error("INVALID_ARGUMENT", "Video path and config are required", null)
             return
         }
         
@@ -194,13 +191,6 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
                     result.error("VIDEO_NOT_FOUND", "Could not read video file", null)
                     return@launch
                 }
-                
-                val compressionConfig = VVideoCompressionConfig(
-                    quality = VVideoCompressQuality.valueOf(quality),
-                    outputPath = outputPathArg,
-                    deleteOriginal = deleteOriginalArg,
-                    advanced = parseAdvancedConfig(advanced)
-                )
                 
                 compressionEngine.compressVideo(
                     videoInfo = videoInfo,
@@ -238,11 +228,23 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
     
     private fun handleCompressVideos(call: MethodCall, result: Result) {
         val videoPaths = call.argument<List<String>>("videoPaths")
-        val quality = call.argument<String>("quality")
-        val advanced = call.arguments as? Map<String, Any>
+        val configMapFromArgs = call.argument<Map<String, Any?>>("config")
+        val legacyQuality = call.argument<String>("quality")
+        val compressionConfig = configMapFromArgs?.let {
+            VVideoCompressionConfig.fromMap(it)
+        } ?: legacyQuality?.let {
+            VVideoCompressionConfig(
+                quality = VVideoCompressQuality.valueOf(it),
+                outputPath = call.argument("outputPath"),
+                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                fallbackToOriginalIfNotSmaller =
+                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                advanced = parseAdvancedConfig(call.arguments as? Map<String, Any>)
+            )
+        }
         
-        if (videoPaths == null || quality == null || videoPaths.isEmpty()) {
-            result.error("INVALID_ARGUMENT", "Video paths and quality are required", null)
+        if (videoPaths == null || compressionConfig == null || videoPaths.isEmpty()) {
+            result.error("INVALID_ARGUMENT", "Video paths and config are required", null)
             return
         }
         
@@ -266,13 +268,6 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
                         ))
                         continue
                     }
-                    
-                    val compressionConfig = VVideoCompressionConfig(
-                        quality = VVideoCompressQuality.valueOf(quality),
-                        outputPath = call.argument<String>("outputPath"),
-                        deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
-                        advanced = parseAdvancedConfig(advanced)
-                    )
                     
                     val compressionResult = withContext(Dispatchers.IO) {
                         var compressionResult: VVideoCompressionResult? = null

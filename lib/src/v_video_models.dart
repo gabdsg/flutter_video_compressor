@@ -3,9 +3,12 @@ library;
 
 /// Dimension alignment handling behavior
 enum VDimensionHandling {
-  autoAlign('AUTO_ALIGN', 'Auto align dimensions to 16-pixel boundaries when needed'),
-  letterbox('LETTERBOX', 'Add black bars to maintain aspect ratio during alignment'),
-  exact('EXACT', 'Keep exact dimensions without alignment (may cause artifacts)');
+  autoAlign(
+      'AUTO_ALIGN', 'Auto align dimensions to 16-pixel boundaries when needed'),
+  letterbox(
+      'LETTERBOX', 'Add black bars to maintain aspect ratio during alignment'),
+  exact(
+      'EXACT', 'Keep exact dimensions without alignment (may cause artifacts)');
 
   const VDimensionHandling(this.value, this.description);
 
@@ -376,10 +379,11 @@ class VVideoAdvancedConfig {
       aggressiveCompression: map['aggressiveCompression'],
       noiseReduction: map['noiseReduction'],
       monoAudio: map['monoAudio'],
-      dimensionHandling: VDimensionHandling.values.cast<VDimensionHandling?>().firstWhere(
-            (handling) => handling?.value == map['dimensionHandling'],
-            orElse: () => null,
-          ),
+      dimensionHandling:
+          VDimensionHandling.values.cast<VDimensionHandling?>().firstWhere(
+                (handling) => handling?.value == map['dimensionHandling'],
+                orElse: () => null,
+              ),
     );
   }
 
@@ -536,6 +540,12 @@ class VVideoCompressionConfig {
   /// Whether to delete the original video file after compression
   final bool deleteOriginal;
 
+  /// Whether to return the original file when compression saves less than 5%.
+  ///
+  /// Set this to `false` when the output codec or container must be guaranteed,
+  /// even if the compressed file is not smaller.
+  final bool fallbackToOriginalIfNotSmaller;
+
   /// Whether to save the compressed video to gallery
   final bool saveToGallery;
 
@@ -570,6 +580,7 @@ class VVideoCompressionConfig {
     required this.quality,
     this.outputPath,
     this.deleteOriginal = false,
+    this.fallbackToOriginalIfNotSmaller = true,
     this.saveToGallery = false,
     this.includeAudio = true,
     this.includeMetadata = true,
@@ -585,6 +596,7 @@ class VVideoCompressionConfig {
   const VVideoCompressionConfig.high({
     this.outputPath,
     this.deleteOriginal = false,
+    this.fallbackToOriginalIfNotSmaller = true,
     this.saveToGallery = false,
     this.includeAudio = true,
     this.includeMetadata = true,
@@ -600,6 +612,7 @@ class VVideoCompressionConfig {
   const VVideoCompressionConfig.medium({
     this.outputPath,
     this.deleteOriginal = false,
+    this.fallbackToOriginalIfNotSmaller = true,
     this.saveToGallery = false,
     this.includeAudio = true,
     this.includeMetadata = true,
@@ -615,6 +628,7 @@ class VVideoCompressionConfig {
   const VVideoCompressionConfig.low({
     this.outputPath,
     this.deleteOriginal = false,
+    this.fallbackToOriginalIfNotSmaller = true,
     this.saveToGallery = false,
     this.includeAudio = true,
     this.includeMetadata = true,
@@ -640,6 +654,7 @@ class VVideoCompressionConfig {
       'quality': quality.value,
       'outputPath': outputPath,
       'deleteOriginal': deleteOriginal,
+      'fallbackToOriginalIfNotSmaller': fallbackToOriginalIfNotSmaller,
       'saveToGallery': saveToGallery,
       'includeAudio': includeAudio,
       'includeMetadata': includeMetadata,
@@ -661,6 +676,8 @@ class VVideoCompressionConfig {
       ),
       outputPath: map['outputPath'],
       deleteOriginal: map['deleteOriginal'] ?? false,
+      fallbackToOriginalIfNotSmaller:
+          map['fallbackToOriginalIfNotSmaller'] ?? true,
       saveToGallery: map['saveToGallery'] ?? false,
       includeAudio: map['includeAudio'] ?? true,
       includeMetadata: map['includeMetadata'] ?? true,
@@ -678,7 +695,7 @@ class VVideoCompressionConfig {
 
   @override
   String toString() {
-    return 'VVideoCompressionConfig(quality: $quality, outputPath: $outputPath, deleteOriginal: $deleteOriginal, saveToGallery: $saveToGallery, includeAudio: $includeAudio, includeMetadata: $includeMetadata, optimizeForStreaming: $optimizeForStreaming, copyMetadata: $copyMetadata, useHardwareAcceleration: $useHardwareAcceleration, useFastStart: $useFastStart, useTwoPassEncoding: $useTwoPassEncoding, useVariableBitrate: $useVariableBitrate, advanced: $advanced)';
+    return 'VVideoCompressionConfig(quality: $quality, outputPath: $outputPath, deleteOriginal: $deleteOriginal, fallbackToOriginalIfNotSmaller: $fallbackToOriginalIfNotSmaller, saveToGallery: $saveToGallery, includeAudio: $includeAudio, includeMetadata: $includeMetadata, optimizeForStreaming: $optimizeForStreaming, copyMetadata: $copyMetadata, useHardwareAcceleration: $useHardwareAcceleration, useFastStart: $useFastStart, useTwoPassEncoding: $useTwoPassEncoding, useVariableBitrate: $useVariableBitrate, advanced: $advanced)';
   }
 }
 
@@ -729,6 +746,9 @@ class VVideoCompressionResult {
   final String compressedResolution;
   final int spaceSaved;
 
+  /// Whether the original input file was returned instead of the encoded file.
+  final bool usedOriginalFile;
+
   const VVideoCompressionResult({
     required this.originalVideo,
     required this.compressedFilePath,
@@ -741,6 +761,7 @@ class VVideoCompressionResult {
     required this.originalResolution,
     required this.compressedResolution,
     required this.spaceSaved,
+    this.usedOriginalFile = false,
   });
 
   factory VVideoCompressionResult.fromMap(Map<String, dynamic> map) {
@@ -759,6 +780,7 @@ class VVideoCompressionResult {
       originalResolution: map['originalResolution'] ?? '',
       compressedResolution: map['compressedResolution'] ?? '',
       spaceSaved: map['spaceSaved']?.toInt() ?? 0,
+      usedOriginalFile: map['usedOriginalFile'] ?? false,
     );
   }
 
@@ -775,6 +797,7 @@ class VVideoCompressionResult {
       'originalResolution': originalResolution,
       'compressedResolution': compressedResolution,
       'spaceSaved': spaceSaved,
+      'usedOriginalFile': usedOriginalFile,
     };
   }
 

@@ -960,8 +960,11 @@ class VVideoCompressionEngine(private val context: Context) {
                         val originalSizeBytes = videoInfo.fileSizeBytes
                         val compressionRatio = compressedSizeBytes.toFloat() / originalSizeBytes
 
-                        // If compression didn't save space (>= 95% of original), use original instead
-                        val finalFile = if (compressionRatio >= 0.95f) {
+                        // Preserve the historical fallback unless the caller needs
+                        // the encoded output to guarantee its codec or container.
+                        val usedOriginalFile =
+                            config.fallbackToOriginalIfNotSmaller && compressionRatio >= 0.95f
+                        val finalFile = if (usedOriginalFile) {
                             println("Issue #7: Compressed file (${compressedSizeBytes}B) is too close to original (${originalSizeBytes}B). Using original.")
                             try {
                                 outputFile.delete()
@@ -977,7 +980,8 @@ class VVideoCompressionEngine(private val context: Context) {
                             originalVideo = videoInfo,
                             compressedFile = finalFile,
                             quality = config.quality,
-                            timeTaken = timeTaken
+                            timeTaken = timeTaken,
+                            usedOriginalFile = usedOriginalFile
                         )
 
                         // Handle post-compression tasks
@@ -1656,7 +1660,8 @@ class VVideoCompressionEngine(private val context: Context) {
         originalVideo: VVideoInfo,
         compressedFile: File,
         quality: VVideoCompressQuality,
-        timeTaken: Long
+        timeTaken: Long,
+        usedOriginalFile: Boolean
     ): VVideoCompressionResult {
         val originalSizeBytes = originalVideo.fileSizeBytes
         val compressedSizeBytes = compressedFile.length()
@@ -1677,7 +1682,8 @@ class VVideoCompressionEngine(private val context: Context) {
             quality = quality,
             originalResolution = originalResolution,
             compressedResolution = compressedResolution,
-            spaceSaved = spaceSaved
+            spaceSaved = spaceSaved,
+            usedOriginalFile = usedOriginalFile
         )
     }
     
@@ -2158,4 +2164,4 @@ class VVideoCompressionEngine(private val context: Context) {
             false
         }
     }
-} 
+}
