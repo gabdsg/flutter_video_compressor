@@ -30,7 +30,7 @@ The plugin follows Flutter's platform channel pattern with three layers:
    - `VVideoMediaLoader.kt` - Video metadata extraction
    - `VVideoModels.kt` - Kotlin data classes mirroring Dart models
 
-3. **iOS Native** (`ios/Classes/`):
+3. **iOS Native** (`ios/v_video_compressor/Sources/v_video_compressor/`):
    - `VVideoCompressorPlugin.swift` - MethodChannel handler
    - `VVideoCompressionEngine.swift` - Core compression using AVFoundation
    - `VVideoMediaLoader.swift` - Video metadata extraction
@@ -149,7 +149,7 @@ When modifying data models, update **all three**:
 
 1. `lib/src/v_video_models.dart` - Dart model with `toMap()`/`fromMap()`
 2. `android/.../VVideoModels.kt` - Kotlin data class with `toMap()`/`fromMap()`
-3. `ios/Classes/VVideoModels.swift` - Swift struct with dictionary conversion
+3. `ios/v_video_compressor/Sources/v_video_compressor/VVideoModels.swift` - Swift struct with dictionary conversion
 
 **Example**: Adding a new compression parameter requires:
 - Add to `VVideoAdvancedConfig` in all three files
@@ -252,15 +252,15 @@ The `example/` app demonstrates all features:
 ### Adding a Compression Parameter
 1. `lib/src/v_video_models.dart` → `VVideoAdvancedConfig`
 2. `android/.../VVideoModels.kt` → `VVideoAdvancedConfig`
-3. `ios/Classes/VVideoModels.swift` → `VVideoAdvancedConfig`
+3. `ios/v_video_compressor/Sources/v_video_compressor/VVideoModels.swift` → `VVideoAdvancedConfig`
 4. `android/.../VVideoCompressionEngine.kt` → Apply parameter
-5. `ios/Classes/VVideoCompressionEngine.swift` → Apply parameter
+5. `ios/v_video_compressor/Sources/v_video_compressor/VVideoCompressionEngine.swift` → Apply parameter
 
 ### Modifying Progress Tracking
 1. `lib/src/v_video_stream_manager.dart` → Stream management
 2. `lib/src/v_video_models.dart` → `VVideoProgressEvent`
 3. `android/.../VVideoCompressorPlugin.kt` → EventChannel emission
-4. `ios/Classes/VVideoCompressorPlugin.swift` → EventChannel emission
+4. `ios/v_video_compressor/Sources/v_video_compressor/VVideoCompressorPlugin.swift` → EventChannel emission
 
 ### Changing Compression Engine Logic
 - **Android**: `VVideoCompressionEngine.kt` → `compressVideo()` method

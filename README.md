@@ -29,7 +29,7 @@ This plugin **focuses exclusively on video compression and thumbnail generation*
 | Platform    | Support             | Minimum Version        | Notes                           |
 | ----------- | ------------------- | ---------------------- | ------------------------------- |
 | **Android** | ✅ **Full Support** | API 21+ (Android 5.0+) | Hardware acceleration available |
-| **iOS**     | ✅ **Full Support** | iOS 11.0+              | Hardware acceleration available |
+| **iOS**     | ✅ **Full Support** | iOS 12.0+              | CocoaPods and SwiftPM supported  |
 
 ## 🚀 **Quick Start**
 
@@ -59,6 +59,9 @@ Add permissions to `android/app/src/main/AndroidManifest.xml`:
 ```
 
 #### iOS Setup
+
+The plugin supports both CocoaPods and Swift Package Manager. Flutter selects
+the configured dependency manager automatically.
 
 Add permissions to `ios/Runner/Info.plist`:
 
