@@ -2,6 +2,12 @@ import Foundation
 import AVFoundation
 import UIKit
 
+protocol VVideoCompressionCallback: AnyObject {
+    func onProgress(_ progress: Float)
+    func onComplete(_ result: VVideoCompressionResult)
+    func onError(_ error: String)
+}
+
 class VVideoCompressionEngine {
     
     // Improved constants from iOS Quick Fix
@@ -18,12 +24,6 @@ class VVideoCompressionEngine {
     
     deinit {
         cleanup()
-    }
-    
-    protocol CompressionCallback: AnyObject {
-        func onProgress(_ progress: Float)
-        func onComplete(_ result: VVideoCompressionResult)
-        func onError(_ error: String)
     }
     
     func getVideoInfo(_ videoPath: String, completion: @escaping (VVideoInfo?) -> Void) {
@@ -124,7 +124,7 @@ class VVideoCompressionEngine {
         }
     }
     
-    func compressVideo(_ videoInfo: VVideoInfo, config: VVideoCompressionConfig, callback: CompressionCallback) {
+    func compressVideo(_ videoInfo: VVideoInfo, config: VVideoCompressionConfig, callback: VVideoCompressionCallback) {
         // Validate inputs
         guard validateCompressionInputs(videoInfo: videoInfo, config: config) else {
             callback.onError("Invalid compression parameters")
@@ -360,7 +360,7 @@ class VVideoCompressionEngine {
         startTime: Double,
         videoInfo: VVideoInfo,
         config: VVideoCompressionConfig,
-        callback: CompressionCallback
+        callback: VVideoCompressionCallback
     ) {
         stopProgressTracking()
         isCompressionActive = false
@@ -528,7 +528,7 @@ class VVideoCompressionEngine {
         }
     }
     
-    private func startProgressTracking(callback: CompressionCallback) {
+    private func startProgressTracking(callback: VVideoCompressionCallback) {
         progressTimer = Timer.scheduledTimer(withTimeInterval: Self.PROGRESS_UPDATE_INTERVAL, repeats: true) { _ in
             guard let exportSession = self.exportSession, !self.isCancelled else { return }
             callback.onProgress(exportSession.progress)
