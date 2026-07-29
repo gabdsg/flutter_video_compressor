@@ -3,6 +3,7 @@ package com.v_chat_sdk.v_video_compressor
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.util.UnstableApi
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -18,6 +19,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** VVideoCompressorPlugin */
+@UnstableApi
 class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.StreamHandler {
     
     /// The MethodChannel that will handle communication between Flutter and native Android
@@ -152,6 +154,8 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
                 val estimate = compressionEngine.estimateCompressionSize(videoInfo, quality, advanced)
                 
                 result.success(estimate.toMap())
+            } catch (e: IllegalArgumentException) {
+                result.error("INVALID_ARGUMENT", e.message, null)
             } catch (e: Exception) {
                 result.error("ERROR", "Failed to get compression estimate: ${e.message}", null)
             }
@@ -163,17 +167,22 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
         // Support both legacy parameters (quality, outputPath, etc.) and new consolidated 'config' map
         val configMapFromArgs = call.argument<Map<String, Any?>>("config")
         val legacyQuality = call.argument<String>("quality")
-        val compressionConfig = configMapFromArgs?.let {
-            VVideoCompressionConfig.fromMap(it)
-        } ?: legacyQuality?.let {
-            VVideoCompressionConfig(
-                quality = VVideoCompressQuality.valueOf(it),
-                outputPath = call.argument("outputPath"),
-                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
-                fallbackToOriginalIfNotSmaller =
-                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
-                advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
-            )
+        val compressionConfig = try {
+            configMapFromArgs?.let {
+                VVideoCompressionConfig.fromMap(it)
+            } ?: legacyQuality?.let {
+                VVideoCompressionConfig(
+                    quality = VVideoCompressQuality.valueOf(it),
+                    outputPath = call.argument("outputPath"),
+                    deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                    fallbackToOriginalIfNotSmaller =
+                        call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                    advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
+                )
+            }
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_ARGUMENT", e.message, null)
+            return
         }
         
         if (videoPath == null || compressionConfig == null) {
@@ -230,17 +239,22 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
         val videoPaths = call.argument<List<String>>("videoPaths")
         val configMapFromArgs = call.argument<Map<String, Any?>>("config")
         val legacyQuality = call.argument<String>("quality")
-        val compressionConfig = configMapFromArgs?.let {
-            VVideoCompressionConfig.fromMap(it)
-        } ?: legacyQuality?.let {
-            VVideoCompressionConfig(
-                quality = VVideoCompressQuality.valueOf(it),
-                outputPath = call.argument("outputPath"),
-                deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
-                fallbackToOriginalIfNotSmaller =
-                    call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
-                advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
-            )
+        val compressionConfig = try {
+            configMapFromArgs?.let {
+                VVideoCompressionConfig.fromMap(it)
+            } ?: legacyQuality?.let {
+                VVideoCompressionConfig(
+                    quality = VVideoCompressQuality.valueOf(it),
+                    outputPath = call.argument("outputPath"),
+                    deleteOriginal = call.argument<Boolean>("deleteOriginal") ?: false,
+                    fallbackToOriginalIfNotSmaller =
+                        call.argument<Boolean>("fallbackToOriginalIfNotSmaller") ?: true,
+                    advanced = parseAdvancedConfig(toStringKeyMap(call.arguments))
+                )
+            }
+        } catch (e: IllegalArgumentException) {
+            result.error("INVALID_ARGUMENT", e.message, null)
+            return
         }
         
         if (videoPaths == null || compressionConfig == null || videoPaths.isEmpty()) {
@@ -470,31 +484,7 @@ class VVideoCompressorPlugin: FlutterPlugin, MethodCallHandler, EventChannel.Str
     
     // Helper methods for parsing configuration
     private fun parseAdvancedConfig(map: Map<String, Any?>?): VVideoAdvancedConfig? {
-        if (map == null) return null
-        
-        return VVideoAdvancedConfig(
-            videoBitrate = (map["videoBitrate"] as? Number)?.toInt(),
-            audioBitrate = (map["audioBitrate"] as? Number)?.toInt(),
-            videoCodec = map["videoCodec"]?.let { 
-                try { VVideoCodec.valueOf(it as String) } catch (e: Exception) { null }
-            },
-            audioCodec = map["audioCodec"]?.let { 
-                try { VAudioCodec.valueOf(it as String) } catch (e: Exception) { null }
-            },
-            removeAudio = map["removeAudio"] as? Boolean,
-            trimStartMs = (map["trimStartMs"] as? Number)?.toInt(),
-            trimEndMs = (map["trimEndMs"] as? Number)?.toInt(),
-            customWidth = (map["customWidth"] as? Number)?.toInt(),
-            customHeight = (map["customHeight"] as? Number)?.toInt(),
-            hardwareAcceleration = map["hardwareAcceleration"] as? Boolean,
-            aggressiveCompression = map["aggressiveCompression"] as? Boolean,
-            variableBitrate = map["variableBitrate"] as? Boolean,
-            monoAudio = map["monoAudio"] as? Boolean,
-            reducedFrameRate = (map["reducedFrameRate"] as? Number)?.toDouble(),
-            encodingSpeed = map["encodingSpeed"]?.let { 
-                try { VEncodingSpeed.valueOf(it as String) } catch (e: Exception) { null }
-            }
-        )
+        return VVideoAdvancedConfig.fromMap(map)
     }
     
     private fun parseThumbnailConfig(map: Map<String, Any?>?): VVideoThumbnailConfig {

@@ -29,5 +29,9 @@ let package = Package(
                 .process("PrivacyInfo.xcprivacy"),
             ]
         ),
+        .testTarget(
+            name: "v_video_compressorTests",
+            dependencies: ["v_video_compressor"]
+        ),
     ]
 )

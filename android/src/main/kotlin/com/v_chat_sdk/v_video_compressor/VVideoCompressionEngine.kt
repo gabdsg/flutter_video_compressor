@@ -19,6 +19,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.Effects
+import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.ScaleAndRotateTransformation
 import java.io.File
@@ -474,10 +475,13 @@ class VVideoCompressionEngine(private val context: Context) {
     private fun validateAndAdjustConfiguration(
         videoInfo: VVideoInfo,
         config: VVideoCompressionConfig,
-        videoMimeType: String
+        videoMimeType: String,
+        cropPlan: VVideoCropPlan? = null
     ): VVideoCompressionConfig {
         // Calculate actual target dimensions and bitrate that will be used
-        val (targetWidth, targetHeight) = calculateAspectRatioPreservingDimensions(
+        val (targetWidth, targetHeight) = cropPlan?.outputSize?.let {
+            Pair(it.width, it.height)
+        } ?: calculateAspectRatioPreservingDimensions(
             videoInfo.width, videoInfo.height, config.quality,
             config.advanced?.customWidth, config.advanced?.customHeight
         )
@@ -944,8 +948,24 @@ class VVideoCompressionEngine(private val context: Context) {
                 .setUri(Uri.fromFile(File(videoInfo.path)))
                 .build()
             
-            // Create edited media item with effects for quality
-            val editedMediaItem = createEditedMediaItemWithQuality(mediaItem, videoInfo, config)
+            val cropPlan = config.advanced?.cropRect
+                ?.takeUnless { it.isFullFrame() }
+                ?.let {
+                    VVideoCropGeometry.createPlan(
+                        displayedWidth = videoInfo.width,
+                        displayedHeight = videoInfo.height,
+                        explicitRotation = config.advanced.rotation ?: 0,
+                        cropRect = it,
+                        quality = config.quality,
+                        customWidth = config.advanced.customWidth,
+                        customHeight = config.advanced.customHeight,
+                        dimensionHandling = config.advanced.dimensionHandling
+                    )
+                }
+
+            // Create one edited item containing clipping, rotation, crop and sizing.
+            val editedMediaItem =
+                createEditedMediaItemWithQuality(mediaItem, videoInfo, config, cropPlan)
             
             // Configure transformer with advanced settings
             val transformerBuilder = Transformer.Builder(context)
@@ -958,7 +978,8 @@ class VVideoCompressionEngine(private val context: Context) {
             transformerBuilder.setVideoMimeType(videoMimeType)
 
             // 4K FIX: Validate and adjust configuration before building transformer
-            val validatedConfig = validateAndAdjustConfiguration(videoInfo, config, videoMimeType)
+            val validatedConfig =
+                validateAndAdjustConfiguration(videoInfo, config, videoMimeType, cropPlan)
 
             // Apply audio codec settings if audio is not removed
             if (validatedConfig.advanced?.removeAudio != true) {
@@ -1015,7 +1036,9 @@ class VVideoCompressionEngine(private val context: Context) {
                         // Preserve the historical fallback unless the caller needs
                         // the encoded output to guarantee its codec or container.
                         val usedOriginalFile =
-                            config.fallbackToOriginalIfNotSmaller && compressionRatio >= 0.95f
+                            config.fallbackToOriginalIfNotSmaller &&
+                                !VVideoCropGeometry.requiresEncodedOutput(videoInfo, config) &&
+                                compressionRatio >= 0.95f
                         val finalFile = if (usedOriginalFile) {
                             println("Issue #7: Compressed file (${compressedSizeBytes}B) is too close to original (${originalSizeBytes}B). Using original.")
                             try {
@@ -1174,7 +1197,7 @@ class VVideoCompressionEngine(private val context: Context) {
             callback.onError(errorMessage)
         }
     }
-    
+
     /**
      * 4K FIX: Gets the next lower quality level for retry attempts
      */
@@ -1625,7 +1648,8 @@ class VVideoCompressionEngine(private val context: Context) {
     private fun createEditedMediaItemWithQuality(
         mediaItem: MediaItem, 
         video: VVideoInfo,
-        config: VVideoCompressionConfig
+        config: VVideoCompressionConfig,
+        cropPlan: VVideoCropPlan? = null
     ): EditedMediaItem {
         val advanced = config.advanced
         
@@ -1638,10 +1662,17 @@ class VVideoCompressionEngine(private val context: Context) {
         }
         
         // Calculate final rotation - either from config or auto-detected
-        val finalRotation = advanced?.rotation ?: if (shouldAutoCorrect) originalRotation else 0
+        val finalRotation = if (cropPlan != null) {
+            // Media3's decoder has already honored source rotation metadata.
+            advanced?.rotation ?: 0
+        } else {
+            advanced?.rotation ?: if (shouldAutoCorrect) originalRotation else 0
+        }
         
         // Calculate proper dimensions that maintain aspect ratio
-        val (finalWidth: Int, finalHeight: Int) = if (video.width > 0 && video.height > 0) {
+        val (finalWidth: Int, finalHeight: Int) = cropPlan?.outputSize?.let {
+            Pair(it.width, it.height)
+        } ?: if (video.width > 0 && video.height > 0) {
             calculateAspectRatioPreservingDimensions(
                 video.width,
                 video.height,
@@ -1677,7 +1708,11 @@ class VVideoCompressionEngine(private val context: Context) {
 
         // ORIENTATION FIX: Apply rotation BEFORE presentation scaling
         if (finalRotation != 0) {
-            val rotationDegrees = finalRotation.toFloat()
+            val rotationDegrees = if (cropPlan != null) {
+                VVideoCropGeometry.cropRotationDegrees(finalRotation)
+            } else {
+                finalRotation.toFloat()
+            }
             val rotationEffect = ScaleAndRotateTransformation.Builder()
                 .setRotationDegrees(rotationDegrees)
                 .build()
@@ -1685,11 +1720,22 @@ class VVideoCompressionEngine(private val context: Context) {
             println("VVideoCompressionEngine: Applied ${finalRotation}° rotation (auto-correct: $shouldAutoCorrect)")
         }
 
+        cropPlan?.let { plan ->
+            videoEffects.add(
+                Crop(
+                    plan.media3Crop.left,
+                    plan.media3Crop.right,
+                    plan.media3Crop.bottom,
+                    plan.media3Crop.top
+                )
+            )
+        }
+
         // Add presentation effect with properly calculated dimensions
         val presentationEffect = Presentation.createForWidthAndHeight(
             finalWidth,
             finalHeight,
-            Presentation.LAYOUT_SCALE_TO_FIT  // Use SCALE_TO_FIT instead of CROP for better rotation handling
+            cropPlan?.presentationLayout ?: Presentation.LAYOUT_SCALE_TO_FIT
         )
         videoEffects.add(presentationEffect)
         
@@ -1702,7 +1748,7 @@ class VVideoCompressionEngine(private val context: Context) {
             .setEffects(effects)
         
         // Apply remove audio if specified
-        if (advanced?.removeAudio == true) {
+        if (advanced?.removeAudio == true || !config.includeAudio) {
             builder.setRemoveAudio(true)
         }
         

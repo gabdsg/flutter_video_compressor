@@ -79,6 +79,79 @@ enum VEncodingSpeed: String, CaseIterable {
     }
 }
 
+enum VDimensionHandling: String {
+    case autoAlign = "AUTO_ALIGN"
+    case letterbox = "LETTERBOX"
+    case exact = "EXACT"
+}
+
+enum VVideoConfigurationError: LocalizedError {
+    case invalidArgument(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidArgument(let message):
+            return message
+        }
+    }
+}
+
+struct VVideoCropRect: Equatable {
+    static let fullFrameTolerance = 1e-6
+
+    let left: Double
+    let top: Double
+    let right: Double
+    let bottom: Double
+
+    func isValid() -> Bool {
+        return left.isFinite && top.isFinite && right.isFinite && bottom.isFinite &&
+            left >= 0 && top >= 0 && right <= 1 && bottom <= 1 &&
+            left < right && top < bottom
+    }
+
+    func isFullFrame() -> Bool {
+        return isValid() &&
+            abs(left) <= Self.fullFrameTolerance &&
+            abs(top) <= Self.fullFrameTolerance &&
+            abs(right - 1) <= Self.fullFrameTolerance &&
+            abs(bottom - 1) <= Self.fullFrameTolerance
+    }
+
+    func toMap() -> [String: Double] {
+        return [
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom
+        ]
+    }
+
+    static func fromMap(_ map: [String: Any]) throws -> VVideoCropRect {
+        func coordinate(_ key: String) throws -> Double {
+            guard let number = map[key] as? NSNumber else {
+                throw VVideoConfigurationError.invalidArgument(
+                    "cropRect.\(key) must be numeric"
+                )
+            }
+            return number.doubleValue
+        }
+
+        let rect = try VVideoCropRect(
+            left: coordinate("left"),
+            top: coordinate("top"),
+            right: coordinate("right"),
+            bottom: coordinate("bottom")
+        )
+        guard rect.isValid() else {
+            throw VVideoConfigurationError.invalidArgument(
+                "cropRect must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1"
+            )
+        }
+        return rect
+    }
+}
+
 // MARK: - Advanced Video Compression Configuration
 
 struct VVideoAdvancedConfig {
@@ -96,6 +169,7 @@ struct VVideoAdvancedConfig {
     let trimStartMs: Int?
     let trimEndMs: Int?
     let rotation: Int?
+    let cropRect: VVideoCropRect?
     let audioSampleRate: Int?
     let audioChannels: Int?
     let removeAudio: Bool?
@@ -110,9 +184,39 @@ struct VVideoAdvancedConfig {
     let aggressiveCompression: Bool?
     let noiseReduction: Bool?
     let monoAudio: Bool?
+    let dimensionHandling: VDimensionHandling?
     
-    static func fromMap(_ map: [String: Any]?) -> VVideoAdvancedConfig? {
+    static func fromMap(_ map: [String: Any]?) throws -> VVideoAdvancedConfig? {
         guard let map = map else { return nil }
+
+        let cropRect: VVideoCropRect?
+        if let cropValue = map["cropRect"] {
+            guard let cropMap = cropValue as? [String: Any] else {
+                throw VVideoConfigurationError.invalidArgument("cropRect must be a map")
+            }
+            cropRect = try VVideoCropRect.fromMap(cropMap)
+        } else {
+            cropRect = nil
+        }
+
+        let dimensionHandling: VDimensionHandling?
+        if let value = map["dimensionHandling"] as? String {
+            guard let parsed = VDimensionHandling(rawValue: value) else {
+                throw VVideoConfigurationError.invalidArgument(
+                    "Unknown dimensionHandling: \(value)"
+                )
+            }
+            dimensionHandling = parsed
+        } else {
+            dimensionHandling = nil
+        }
+
+        let rotation = map["rotation"] as? Int
+        if let rotation = rotation, ![0, 90, 180, 270].contains(rotation) {
+            throw VVideoConfigurationError.invalidArgument(
+                "rotation must be 0, 90, 180, or 270"
+            )
+        }
         
         return VVideoAdvancedConfig(
             videoBitrate: map["videoBitrate"] as? Int,
@@ -128,7 +232,8 @@ struct VVideoAdvancedConfig {
             hardwareAcceleration: map["hardwareAcceleration"] as? Bool,
             trimStartMs: map["trimStartMs"] as? Int,
             trimEndMs: map["trimEndMs"] as? Int,
-            rotation: map["rotation"] as? Int,
+            rotation: rotation,
+            cropRect: cropRect,
             audioSampleRate: map["audioSampleRate"] as? Int,
             audioChannels: map["audioChannels"] as? Int,
             removeAudio: map["removeAudio"] as? Bool,
@@ -142,7 +247,8 @@ struct VVideoAdvancedConfig {
             reducedFrameRate: map["reducedFrameRate"] as? Double,
             aggressiveCompression: map["aggressiveCompression"] as? Bool,
             noiseReduction: map["noiseReduction"] as? Bool,
-            monoAudio: map["monoAudio"] as? Bool
+            monoAudio: map["monoAudio"] as? Bool,
+            dimensionHandling: dimensionHandling
         )
     }
 }
@@ -229,15 +335,17 @@ struct VVideoCompressionConfig {
     let outputPath: String?
     let deleteOriginal: Bool
     let fallbackToOriginalIfNotSmaller: Bool
+    let includeAudio: Bool
     let advanced: VVideoAdvancedConfig?
     
-    static func fromMap(_ map: [String: Any]) -> VVideoCompressionConfig {
+    static func fromMap(_ map: [String: Any]) throws -> VVideoCompressionConfig {
         return VVideoCompressionConfig(
             quality: VVideoCompressQuality.fromString(map["quality"] as? String),
             outputPath: map["outputPath"] as? String,
             deleteOriginal: map["deleteOriginal"] as? Bool ?? false,
             fallbackToOriginalIfNotSmaller: map["fallbackToOriginalIfNotSmaller"] as? Bool ?? true,
-            advanced: VVideoAdvancedConfig.fromMap(map["advanced"] as? [String: Any])
+            includeAudio: map["includeAudio"] as? Bool ?? true,
+            advanced: try VVideoAdvancedConfig.fromMap(map["advanced"] as? [String: Any])
         )
     }
 }

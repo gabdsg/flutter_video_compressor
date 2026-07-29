@@ -33,6 +33,10 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
   final TextEditingController _crfController = TextEditingController();
   final TextEditingController _trimStartController = TextEditingController();
   final TextEditingController _trimEndController = TextEditingController();
+  final TextEditingController _cropLeftController = TextEditingController();
+  final TextEditingController _cropTopController = TextEditingController();
+  final TextEditingController _cropRightController = TextEditingController();
+  final TextEditingController _cropBottomController = TextEditingController();
   final TextEditingController _audioSampleRateController =
       TextEditingController();
   final TextEditingController _audioChannelsController =
@@ -60,6 +64,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
   bool _aggressiveCompression = false;
   bool _noiseReduction = false;
   bool _monoAudio = false;
+  bool _cropEnabled = false;
 
   // Validation
   String? _validationError;
@@ -70,6 +75,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
   bool _advancedSettingsExpanded = false;
   bool _colorSettingsExpanded = false;
   bool _trimSettingsExpanded = false;
+  bool _cropSettingsExpanded = false;
 
   @override
   void initState() {
@@ -87,6 +93,10 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
     _crfController.dispose();
     _trimStartController.dispose();
     _trimEndController.dispose();
+    _cropLeftController.dispose();
+    _cropTopController.dispose();
+    _cropRightController.dispose();
+    _cropBottomController.dispose();
     _audioSampleRateController.dispose();
     _audioChannelsController.dispose();
     _brightnessController.dispose();
@@ -112,6 +122,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
     _keyframeIntervalController.text = '2';
     _bFramesController.text = '2';
     _reducedFrameRateController.text = '30.0';
+    _resetCropFields();
   }
 
   @override
@@ -187,6 +198,8 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
                   _buildColorSettingsCard(),
                   const SizedBox(height: 16),
                   _buildTrimSettingsCard(),
+                  const SizedBox(height: 16),
+                  _buildCropSettingsCard(),
                   const SizedBox(height: 100),
                 ],
               ),
@@ -601,6 +614,99 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
     );
   }
 
+  Widget _buildCropSettingsCard() {
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            title: const Text(
+              'Normalized Crop',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text(
+              'Coordinates use the displayed frame after rotation',
+            ),
+            trailing: Icon(
+              _cropSettingsExpanded ? Icons.expand_less : Icons.expand_more,
+            ),
+            onTap: () =>
+                setState(() => _cropSettingsExpanded = !_cropSettingsExpanded),
+          ),
+          if (_cropSettingsExpanded)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  _buildSwitchTile(
+                    'Enable crop coordinates',
+                    _cropEnabled,
+                    (value) => setState(() => _cropEnabled = value),
+                    subtitle:
+                        'Use values from 0.0 to 1.0; full frame is a no-op',
+                  ),
+                  if (_cropEnabled) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildNumberField(
+                            'Left',
+                            _cropLeftController,
+                            '0.0',
+                            allowDecimal: true,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildNumberField(
+                            'Top',
+                            _cropTopController,
+                            '0.0',
+                            allowDecimal: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildNumberField(
+                            'Right',
+                            _cropRightController,
+                            '1.0',
+                            allowDecimal: true,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildNumberField(
+                            'Bottom',
+                            _cropBottomController,
+                            '1.0',
+                            allowDecimal: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => setState(_resetCropFields),
+                        icon: const Icon(Icons.crop_free),
+                        label: const Text('Reset to full frame'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInfoRow(String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -882,6 +988,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
       _aggressiveCompression = false;
       _noiseReduction = false;
       _monoAudio = false;
+      _cropEnabled = false;
 
       _deleteOriginal = false;
     });
@@ -893,6 +1000,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
     _crfController.text = '23';
     _trimStartController.clear();
     _trimEndController.clear();
+    _resetCropFields();
     _audioSampleRateController.text = '44100';
     _audioChannelsController.text = '2';
     _brightnessController.text = '0.0';
@@ -961,6 +1069,17 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
       }
     }
 
+    if (_cropEnabled) {
+      final cropRect = _readCropRect();
+      if (cropRect == null || !cropRect.isValid()) {
+        setState(
+          () => _validationError =
+              'Crop requires finite values with 0 ≤ left < right ≤ 1 and 0 ≤ top < bottom ≤ 1',
+        );
+        return false;
+      }
+    }
+
     // Validate color adjustments
     for (final controller in [
       _brightnessController,
@@ -1014,6 +1133,7 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
           ? int.tryParse(_trimEndController.text)
           : null,
       rotation: _selectedRotation != 0 ? _selectedRotation : null,
+      cropRect: _cropEnabled ? _readCropRect() : null,
       audioSampleRate: _audioSampleRateController.text.isNotEmpty
           ? int.tryParse(_audioSampleRateController.text)
           : null,
@@ -1044,6 +1164,24 @@ class _AdvancedCompressionPageState extends State<AdvancedCompressionPage> {
       noiseReduction: _noiseReduction,
       monoAudio: _monoAudio,
     );
+  }
+
+  VVideoCropRect? _readCropRect() {
+    final left = double.tryParse(_cropLeftController.text);
+    final top = double.tryParse(_cropTopController.text);
+    final right = double.tryParse(_cropRightController.text);
+    final bottom = double.tryParse(_cropBottomController.text);
+    if (left == null || top == null || right == null || bottom == null) {
+      return null;
+    }
+    return VVideoCropRect(left: left, top: top, right: right, bottom: bottom);
+  }
+
+  void _resetCropFields() {
+    _cropLeftController.text = '0.0';
+    _cropTopController.text = '0.0';
+    _cropRightController.text = '1.0';
+    _cropBottomController.text = '1.0';
   }
 
   void _validateAndCompress() {

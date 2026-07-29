@@ -69,6 +69,74 @@ enum class VEncodingSpeed(val value: String) {
     }
 }
 
+enum class VDimensionHandling(val value: String) {
+    AUTO_ALIGN("AUTO_ALIGN"),
+    LETTERBOX("LETTERBOX"),
+    EXACT("EXACT");
+
+    companion object {
+        fun fromString(value: String?): VDimensionHandling? =
+            values().find { it.value == value }
+    }
+}
+
+/**
+ * A crop rectangle in normalized top-left Flutter frame coordinates.
+ */
+data class VVideoCropRect(
+    val left: Double,
+    val top: Double,
+    val right: Double,
+    val bottom: Double
+) {
+    fun isValid(): Boolean =
+        left.isFinite() &&
+            top.isFinite() &&
+            right.isFinite() &&
+            bottom.isFinite() &&
+            left >= 0.0 &&
+            top >= 0.0 &&
+            right <= 1.0 &&
+            bottom <= 1.0 &&
+            left < right &&
+            top < bottom
+
+    fun isFullFrame(): Boolean =
+        isValid() &&
+            kotlin.math.abs(left) <= FULL_FRAME_TOLERANCE &&
+            kotlin.math.abs(top) <= FULL_FRAME_TOLERANCE &&
+            kotlin.math.abs(right - 1.0) <= FULL_FRAME_TOLERANCE &&
+            kotlin.math.abs(bottom - 1.0) <= FULL_FRAME_TOLERANCE
+
+    fun toMap(): Map<String, Double> = mapOf(
+        "left" to left,
+        "top" to top,
+        "right" to right,
+        "bottom" to bottom
+    )
+
+    companion object {
+        const val FULL_FRAME_TOLERANCE = 1e-6
+
+        fun fromMap(map: Map<String, Any?>): VVideoCropRect {
+            fun coordinate(key: String): Double =
+                (map[key] as? Number)?.toDouble()
+                    ?: throw IllegalArgumentException("cropRect.$key must be numeric")
+
+            return VVideoCropRect(
+                left = coordinate("left"),
+                top = coordinate("top"),
+                right = coordinate("right"),
+                bottom = coordinate("bottom")
+            ).also {
+                require(it.isValid()) {
+                    "cropRect must satisfy 0 <= left < right <= 1 and 0 <= top < bottom <= 1"
+                }
+            }
+        }
+    }
+}
+
 /**
  * Advanced video compression configuration
  */
@@ -87,6 +155,7 @@ data class VVideoAdvancedConfig(
     val trimStartMs: Int? = null,
     val trimEndMs: Int? = null,
     val rotation: Int? = null,
+    val cropRect: VVideoCropRect? = null,
     val audioSampleRate: Int? = null,
     val audioChannels: Int? = null,
     val removeAudio: Boolean? = null,
@@ -100,12 +169,28 @@ data class VVideoAdvancedConfig(
     val reducedFrameRate: Double? = null,
     val aggressiveCompression: Boolean? = null,
     val noiseReduction: Boolean? = null,
-    val monoAudio: Boolean? = null
+    val monoAudio: Boolean? = null,
+    val dimensionHandling: VDimensionHandling? = null
 ) {
     companion object {
         fun fromMap(map: Map<String, Any?>?): VVideoAdvancedConfig? {
             if (map == null) return null
             
+            val cropValue = map["cropRect"]
+            val cropRect = when (cropValue) {
+                null -> null
+                is Map<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    VVideoCropRect.fromMap(cropValue as Map<String, Any?>)
+                }
+                else -> throw IllegalArgumentException("cropRect must be a map")
+            }
+            val dimensionValue = map["dimensionHandling"] as? String
+            val dimensionHandling = VDimensionHandling.fromString(dimensionValue)
+            if (dimensionValue != null && dimensionHandling == null) {
+                throw IllegalArgumentException("Unknown dimensionHandling: $dimensionValue")
+            }
+
             return VVideoAdvancedConfig(
                 videoBitrate = (map["videoBitrate"] as? Number)?.toInt(),
                 audioBitrate = (map["audioBitrate"] as? Number)?.toInt(),
@@ -121,6 +206,7 @@ data class VVideoAdvancedConfig(
                 trimStartMs = (map["trimStartMs"] as? Number)?.toInt(),
                 trimEndMs = (map["trimEndMs"] as? Number)?.toInt(),
                 rotation = (map["rotation"] as? Number)?.toInt(),
+                cropRect = cropRect,
                 audioSampleRate = (map["audioSampleRate"] as? Number)?.toInt(),
                 audioChannels = (map["audioChannels"] as? Number)?.toInt(),
                 removeAudio = map["removeAudio"] as? Boolean,
@@ -134,8 +220,13 @@ data class VVideoAdvancedConfig(
                 reducedFrameRate = (map["reducedFrameRate"] as? Number)?.toDouble(),
                 aggressiveCompression = map["aggressiveCompression"] as? Boolean,
                 noiseReduction = map["noiseReduction"] as? Boolean,
-                monoAudio = map["monoAudio"] as? Boolean
-            )
+                monoAudio = map["monoAudio"] as? Boolean,
+                dimensionHandling = dimensionHandling
+            ).also {
+                require(it.rotation == null || it.rotation in listOf(0, 90, 180, 270)) {
+                    "rotation must be 0, 90, 180, or 270"
+                }
+            }
         }
     }
 }
@@ -220,6 +311,7 @@ data class VVideoCompressionConfig(
     val outputPath: String? = null,
     val deleteOriginal: Boolean = false,
     val fallbackToOriginalIfNotSmaller: Boolean = true,
+    val includeAudio: Boolean = true,
     val advanced: VVideoAdvancedConfig? = null
 ) {
     companion object {
@@ -231,6 +323,7 @@ data class VVideoCompressionConfig(
                 deleteOriginal = map["deleteOriginal"] as? Boolean ?: false,
                 fallbackToOriginalIfNotSmaller =
                     map["fallbackToOriginalIfNotSmaller"] as? Boolean ?: true,
+                includeAudio = map["includeAudio"] as? Boolean ?: true,
                 advanced = VVideoAdvancedConfig.fromMap(map["advanced"] as? Map<String, Any?>)
             )
         }

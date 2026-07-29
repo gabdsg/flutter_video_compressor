@@ -104,6 +104,101 @@ enum VVideoCompressionStatus {
   final String description;
 }
 
+/// A normalized crop rectangle in the correctly displayed video frame.
+///
+/// Coordinates use the inclusive `0.0..1.0` frame coordinate space after
+/// source orientation metadata and the requested discrete rotation are
+/// applied. [left] and [top] are the starting edges; [right] and [bottom] are
+/// the ending edges.
+class VVideoCropRect {
+  const VVideoCropRect({
+    required this.left,
+    required this.top,
+    required this.right,
+    required this.bottom,
+  });
+
+  /// Tolerance used only when detecting the full-frame no-op rectangle.
+  static const double fullFrameTolerance = 1e-6;
+
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  /// Whether every coordinate is finite and the rectangle has positive area
+  /// entirely inside the normalized frame.
+  bool isValid() {
+    return left.isFinite &&
+        top.isFinite &&
+        right.isFinite &&
+        bottom.isFinite &&
+        left >= 0.0 &&
+        top >= 0.0 &&
+        right <= 1.0 &&
+        bottom <= 1.0 &&
+        left < right &&
+        top < bottom;
+  }
+
+  /// Whether this valid rectangle selects the complete frame.
+  ///
+  /// The tolerance avoids treating harmless serialization round-off as an
+  /// effective edit. It is not used to clamp or validate coordinates.
+  bool isFullFrame() {
+    return isValid() &&
+        left.abs() <= fullFrameTolerance &&
+        top.abs() <= fullFrameTolerance &&
+        (right - 1.0).abs() <= fullFrameTolerance &&
+        (bottom - 1.0).abs() <= fullFrameTolerance;
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'left': left,
+      'top': top,
+      'right': right,
+      'bottom': bottom,
+    };
+  }
+
+  factory VVideoCropRect.fromMap(Map<String, dynamic> map) {
+    double coordinate(String key) {
+      final value = map[key];
+      if (value is! num) {
+        throw ArgumentError.value(
+            value, key, 'Crop coordinate must be numeric');
+      }
+      return value.toDouble();
+    }
+
+    return VVideoCropRect(
+      left: coordinate('left'),
+      top: coordinate('top'),
+      right: coordinate('right'),
+      bottom: coordinate('bottom'),
+    );
+  }
+
+  @override
+  String toString() {
+    return 'VVideoCropRect(left: $left, top: $top, right: $right, bottom: $bottom)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is VVideoCropRect &&
+            left == other.left &&
+            top == other.top &&
+            right == other.right &&
+            bottom == other.bottom;
+  }
+
+  @override
+  int get hashCode => Object.hash(left, top, right, bottom);
+}
+
 /// Advanced video compression configuration
 class VVideoAdvancedConfig {
   /// Custom video bitrate in bits per second (overrides quality preset)
@@ -147,6 +242,9 @@ class VVideoAdvancedConfig {
 
   /// Rotate video (degrees: 0, 90, 180, 270)
   final int? rotation;
+
+  /// Optional normalized crop in the displayed, explicitly rotated frame.
+  final VVideoCropRect? cropRect;
 
   /// Audio sample rate in Hz
   final int? audioSampleRate;
@@ -208,6 +306,7 @@ class VVideoAdvancedConfig {
     this.trimStartMs,
     this.trimEndMs,
     this.rotation,
+    this.cropRect,
     this.audioSampleRate,
     this.audioChannels,
     this.removeAudio,
@@ -254,6 +353,10 @@ class VVideoAdvancedConfig {
 
     // Rotation must be valid degrees
     if (rotation != null && ![0, 90, 180, 270].contains(rotation!)) {
+      return false;
+    }
+
+    if (cropRect != null && !cropRect!.isValid()) {
       return false;
     }
 
@@ -305,7 +408,7 @@ class VVideoAdvancedConfig {
   }
 
   Map<String, dynamic> toMap() {
-    return {
+    final map = <String, dynamic>{
       'videoBitrate': videoBitrate,
       'audioBitrate': audioBitrate,
       'customWidth': customWidth,
@@ -336,6 +439,10 @@ class VVideoAdvancedConfig {
       'monoAudio': monoAudio,
       'dimensionHandling': dimensionHandling?.value,
     };
+    if (cropRect != null) {
+      map['cropRect'] = cropRect!.toMap();
+    }
+    return map;
   }
 
   factory VVideoAdvancedConfig.fromMap(Map<String, dynamic>? map) {
@@ -365,6 +472,11 @@ class VVideoAdvancedConfig {
       trimStartMs: map['trimStartMs']?.toInt(),
       trimEndMs: map['trimEndMs']?.toInt(),
       rotation: map['rotation']?.toInt(),
+      cropRect: map['cropRect'] is Map
+          ? VVideoCropRect.fromMap(
+              Map<String, dynamic>.from(map['cropRect'] as Map),
+            )
+          : null,
       audioSampleRate: map['audioSampleRate']?.toInt(),
       audioChannels: map['audioChannels']?.toInt(),
       removeAudio: map['removeAudio'],
