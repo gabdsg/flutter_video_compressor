@@ -161,9 +161,52 @@ class VVideoCompressionEngine {
         print("VVideoCompressionEngine: FIXED ROTATION - Starting compression")
         
         let presetName = getExportPreset(for: config.quality, advanced: config.advanced)
+
+        let effectiveCrop = config.advanced?.cropRect.flatMap {
+            $0.isFullFrame() ? nil : $0
+        }
+        let removesAudio = config.advanced?.removeAudio == true || !config.includeAudio
+        var exportAsset: AVAsset = asset
+        var cropPlan: VVideoCropPlan?
+        var trimAlreadyApplied = false
+
+        if effectiveCrop != nil || removesAudio {
+            guard let sourceVideoTrack = asset.tracks(withMediaType: .video).first else {
+                callback.onError("No video track found")
+                isCompressionActive = false
+                return
+            }
+            do {
+                if let cropRect = effectiveCrop {
+                    cropPlan = try VVideoCropGeometry.createPlan(
+                        naturalSize: sourceVideoTrack.naturalSize,
+                        preferredTransform: sourceVideoTrack.preferredTransform,
+                        explicitRotation: config.advanced?.rotation ?? 0,
+                        cropRect: cropRect,
+                        quality: config.quality,
+                        customWidth: config.advanced?.customWidth,
+                        customHeight: config.advanced?.customHeight,
+                        dimensionHandling: config.advanced?.dimensionHandling
+                    )
+                }
+                exportAsset = try createInMemoryComposition(
+                    asset: asset,
+                    config: config,
+                    removeAudio: removesAudio
+                )
+                trimAlreadyApplied =
+                    config.advanced?.trimStartMs != nil ||
+                    config.advanced?.trimEndMs != nil
+            } catch {
+                callback.onError(error.localizedDescription)
+                isCompressionActive = false
+                return
+            }
+        }
         
-        guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
+        guard let exportSession = AVAssetExportSession(asset: exportAsset, presetName: presetName) else {
             callback.onError("Unable to create export session")
+            isCompressionActive = false
             return
         }
         
@@ -184,9 +227,20 @@ class VVideoCompressionEngine {
         metadata.append(item)
         exportSession.metadata = metadata
         
-        if needsAdvancedComposition(config: config) {
+        if let cropPlan = cropPlan {
+            applyCropComposition(
+                exportSession: exportSession,
+                plan: cropPlan,
+                config: config
+            )
+        } else if needsAdvancedComposition(config: config) {
             print("VVideoCompressionEngine: Applying WORKING rotation")
-            applyAdvancedComposition(exportSession: exportSession, videoInfo: videoInfo, config: config)
+            applyAdvancedComposition(
+                exportSession: exportSession,
+                videoInfo: videoInfo,
+                config: config,
+                trimAlreadyApplied: trimAlreadyApplied
+            )
         }
         
         startProgressTracking(callback: callback)
@@ -251,7 +305,12 @@ class VVideoCompressionEngine {
         return (dimension / 16) * 16
     }
 
-    private func applyAdvancedComposition(exportSession: AVAssetExportSession, videoInfo: VVideoInfo, config: VVideoCompressionConfig) {
+    private func applyAdvancedComposition(
+        exportSession: AVAssetExportSession,
+        videoInfo: VVideoInfo,
+        config: VVideoCompressionConfig,
+        trimAlreadyApplied: Bool = false
+    ) {
         let asset = exportSession.asset
 
         guard let videoTrack = asset.tracks(withMediaType: .video).first else {
@@ -345,7 +404,9 @@ class VVideoCompressionEngine {
         videoComposition.instructions = [instruction]
         exportSession.videoComposition = videoComposition
         
-        if let trimStartMs = config.advanced?.trimStartMs, let trimEndMs = config.advanced?.trimEndMs {
+        if !trimAlreadyApplied,
+           let trimStartMs = config.advanced?.trimStartMs,
+           let trimEndMs = config.advanced?.trimEndMs {
             let startTime = CMTime(seconds: Double(trimStartMs) / 1000.0, preferredTimescale: 600)
             let endTime = CMTime(seconds: Double(trimEndMs) / 1000.0, preferredTimescale: 600)
             exportSession.timeRange = CMTimeRange(start: startTime, duration: CMTimeSubtract(endTime, startTime))
@@ -353,6 +414,107 @@ class VVideoCompressionEngine {
         }
         
         print("VVideoCompressionEngine: ORIENTATION FIXED - composition applied successfully!")
+    }
+
+    private func createInMemoryComposition(
+        asset: AVAsset,
+        config: VVideoCompressionConfig,
+        removeAudio: Bool
+    ) throws -> AVMutableComposition {
+        guard let sourceVideoTrack = asset.tracks(withMediaType: .video).first else {
+            throw VVideoConfigurationError.invalidArgument("No video track found")
+        }
+
+        let startSeconds = Double(config.advanced?.trimStartMs ?? 0) / 1000
+        let endSeconds = config.advanced?.trimEndMs.map { Double($0) / 1000 } ??
+            CMTimeGetSeconds(asset.duration)
+        let assetDurationSeconds = CMTimeGetSeconds(asset.duration)
+        guard startSeconds >= 0,
+              endSeconds > startSeconds,
+              endSeconds <= assetDurationSeconds + 0.001 else {
+            throw VVideoConfigurationError.invalidArgument(
+                "Trim range must be inside the source duration"
+            )
+        }
+
+        let start = CMTime(seconds: startSeconds, preferredTimescale: 600)
+        let end = CMTime(seconds: endSeconds, preferredTimescale: 600)
+        let sourceRange = CMTimeRange(
+            start: start,
+            duration: CMTimeSubtract(end, start)
+        )
+        let composition = AVMutableComposition()
+        guard let videoTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            throw VVideoConfigurationError.invalidArgument(
+                "Unable to create composition video track"
+            )
+        }
+        try videoTrack.insertTimeRange(
+            sourceRange,
+            of: sourceVideoTrack,
+            at: .zero
+        )
+        videoTrack.preferredTransform = sourceVideoTrack.preferredTransform
+
+        if !removeAudio {
+            for sourceAudioTrack in asset.tracks(withMediaType: .audio) {
+                guard let audioTrack = composition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                ) else {
+                    continue
+                }
+                try audioTrack.insertTimeRange(
+                    sourceRange,
+                    of: sourceAudioTrack,
+                    at: .zero
+                )
+            }
+        }
+        return composition
+    }
+
+    private func applyCropComposition(
+        exportSession: AVAssetExportSession,
+        plan: VVideoCropPlan,
+        config: VVideoCompressionConfig
+    ) {
+        guard let videoTrack = exportSession.asset.tracks(withMediaType: .video).first else {
+            return
+        }
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.renderSize = CGSize(
+            width: plan.outputSize.width,
+            height: plan.outputSize.height
+        )
+        let frameRate =
+            config.advanced?.frameRate ?? Double(Self.DEFAULT_FRAME_RATE)
+        videoComposition.frameDuration = CMTime(
+            value: 1,
+            timescale: Int32(max(1, Int(frameRate.rounded())))
+        )
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(
+            start: .zero,
+            duration: exportSession.asset.duration
+        )
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(
+            assetTrack: videoTrack
+        )
+        layerInstruction.setTransform(plan.transform, at: .zero)
+        if let brightness = config.advanced?.brightness, brightness != 0 {
+            layerInstruction.setOpacity(
+                Float(max(0.1, min(1.0, 1.0 + brightness))),
+                at: .zero
+            )
+        }
+        instruction.layerInstructions = [layerInstruction]
+        videoComposition.instructions = [instruction]
+        exportSession.videoComposition = videoComposition
     }
     
     private func handleCompressionCompletion(
@@ -390,7 +552,10 @@ class VVideoCompressionEngine {
 
             // Preserve the historical fallback unless the caller needs the
             // encoded output to guarantee its codec or container.
-            let usedOriginalFile = config.fallbackToOriginalIfNotSmaller && compressionRatio >= 0.95
+            let usedOriginalFile =
+                config.fallbackToOriginalIfNotSmaller &&
+                !VVideoCropGeometry.requiresEncodedOutput(video: videoInfo, config: config) &&
+                compressionRatio >= 0.95
             let finalURL: URL
             if usedOriginalFile {
                 print("VVideoCompressionEngine: Issue #7 - Compressed file (\(compressedSizeBytes)B) is too close to original (\(originalSizeBytes)B). Using original.")
@@ -555,9 +720,10 @@ class VVideoCompressionEngine {
         
         try? FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         
-        let timestamp = Int(Date().timeIntervalSince1970)
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
         let videoBaseName = URL(fileURLWithPath: videoInfo.name).deletingPathExtension().lastPathComponent
-        let filename = "\(videoBaseName)_\(quality.rawValue)_\(timestamp).mp4"
+        let filename =
+            "\(videoBaseName)_\(quality.rawValue)_\(timestamp)_\(UUID().uuidString).mp4"
         
         return outputDirectory.appendingPathComponent(filename)
     }

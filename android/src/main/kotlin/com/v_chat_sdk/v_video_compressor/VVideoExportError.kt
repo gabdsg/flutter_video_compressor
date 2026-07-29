@@ -1,5 +1,6 @@
 package com.v_chat_sdk.v_video_compressor
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.ExportException
 
 /**
@@ -8,6 +9,7 @@ import androidx.media3.transformer.ExportException
  * Keeping this logic independent from Android framework state makes the
  * retry policy deterministic and unit-testable.
  */
+@UnstableApi
 internal object VVideoExportError {
     private val muxerErrorCodes = setOf(
         ExportException.ERROR_CODE_MUXING_FAILED,

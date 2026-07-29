@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:v_video_compressor/v_video_compressor.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:gal/gal.dart';
+import 'crop_compression_page.dart';
 import 'four_k_test_page.dart';
 
 void main() {
@@ -95,7 +96,9 @@ class _MyHomePageState extends State<MyHomePage> {
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (context) => const FourKTestPage()),
+                          MaterialPageRoute(
+                            builder: (context) => const FourKTestPage(),
+                          ),
                         );
                       },
                       child: const Text('4K Test'),
@@ -143,6 +146,46 @@ class _MyHomePageState extends State<MyHomePage> {
             ],
 
             if (_selectedVideoPath != null) ...[
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.crop,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Crop export example',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Choose normalized coordinates, trim times, and a '
+                        'rotation, then export everything in one native pass.',
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        key: const Key('openCropExampleButton'),
+                        onPressed: _videoInfo == null ? null : _openCropExample,
+                        icon: const Icon(Icons.crop_rotate),
+                        label: const Text('Crop, trim & rotate'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // Compression Options
               Card(
                 child: Padding(
@@ -319,6 +362,26 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<void> _compressVideo(VVideoCompressQuality quality) async {
+    await _compressWithConfig(VVideoCompressionConfig(quality: quality));
+  }
+
+  void _openCropExample() {
+    final videoPath = _selectedVideoPath;
+    final videoInfo = _videoInfo;
+    if (videoPath == null || videoInfo == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => CropCompressionPage(
+          videoPath: videoPath,
+          videoInfo: videoInfo,
+          onCompress: _compressWithConfig,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _compressWithConfig(VVideoCompressionConfig config) async {
     if (_selectedVideoPath == null) return;
 
     setState(() {
@@ -328,8 +391,6 @@ class _MyHomePageState extends State<MyHomePage> {
     });
 
     try {
-      final config = VVideoCompressionConfig(quality: quality);
-
       final result = await _compressor.compressVideo(
         _selectedVideoPath!,
         config,

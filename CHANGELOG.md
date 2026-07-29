@@ -1,3 +1,24 @@
+## [2.2.0] - 2026-07-29
+
+### Added
+
+- Added a strongly typed normalized `VVideoCropRect` contract across Dart,
+  Android Media3, and iOS AVFoundation.
+- Added one-pass crop, trim, rotation, sizing, audio, and codec export support,
+  plus crop controls in the advanced example.
+- Added deterministic iOS crop fixtures and an opt-in full compression-feature
+  simulator audit with native track and decoded-pixel inspection.
+- Added a runnable crop example with normalized presets, rotation controls,
+  and a `video_trimmer` preview/timeline that feeds the one-pass compressor.
+
+### Changed
+
+- Effective edits and explicit output guarantees can no longer fall back to
+  the unedited original file when the encoded result is not smaller.
+- Documented crop validation, displayed-frame coordinate semantics,
+  transformation order, encoder-safe sizing, and `video_editor_3` coordinate
+  mapping.
+
 ## [2.1.0] - 2026-07-27
 
 ### Added

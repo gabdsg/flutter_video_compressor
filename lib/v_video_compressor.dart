@@ -31,6 +31,7 @@ export 'src/v_video_models.dart'
         VEncodingSpeed,
         VThumbnailFormat,
         VDimensionHandling,
+        VVideoCropRect,
         VVideoAdvancedConfig,
         VVideoInfo,
         VVideoCompressionConfig,

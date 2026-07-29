@@ -39,7 +39,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  v_video_compressor: ^2.1.0
+  v_video_compressor: ^2.2.0
   file_picker: ^8.0.0 # For video selection
   # OR
   image_picker: ^1.0.7 # Alternative for video selection
@@ -359,11 +359,132 @@ final result = await _compressor.compressVideo(
 );
 ```
 
+### Normalized Crop Coordinates
+
+`VVideoCropRect` selects a real output region; it is not a preview scale or a
+letterbox mask. Coordinates are normalized doubles in the inclusive `0.0..1.0`
+space of the correctly displayed frame after source orientation metadata and
+the requested `0`, `90`, `180`, or `270` degree rotation have been applied.
+`left` and `top` are the starting edges and `right` and `bottom` are the ending
+edges. Crop-aware rotation values follow `video_editor_3`: `90` is a left
+(counter-clockwise) turn and `270` is a right (clockwise) turn.
+
+A crop is valid only when every value is finite and:
+
+- `0 <= left < right <= 1`
+- `0 <= top < bottom <= 1`
+
+Invalid values are rejected and are never clamped. `(0, 0, 1, 1)` is a
+full-frame no-op; full-frame detection uses a `1e-6` tolerance only for
+floating-point round-off.
+
+```dart
+const cropRect = VVideoCropRect(
+  left: 0.0,
+  top: 0.0,
+  right: 0.5,
+  bottom: 0.5,
+);
+
+if (!cropRect.isValid()) {
+  throw ArgumentError('Invalid crop coordinates');
+}
+
+final result = await compressor.compressVideo(
+  inputPath,
+  const VVideoCompressionConfig(
+    quality: VVideoCompressQuality.medium,
+    advanced: VVideoAdvancedConfig(
+      trimStartMs: 1000,
+      trimEndMs: 5000,
+      rotation: 90,
+      cropRect: cropRect,
+      videoCodec: VVideoCodec.h264,
+    ),
+  ),
+);
+```
+
+The native export uses one encoding pass in this deterministic order:
+
+1. Honor source orientation metadata.
+2. Apply the requested discrete rotation.
+3. Convert the normalized crop to oriented pixels and move it to `(0, 0)`.
+4. Apply output sizing without stretching.
+5. Encode and mux together with trimming and audio handling.
+
+Coordinates exposed by `video_editor_3` can be mapped directly without adding
+that package as a dependency of `v_video_compressor`:
+
+```dart
+final cropRect = VVideoCropRect(
+  left: controller.minCrop.dx,
+  top: controller.minCrop.dy,
+  right: controller.maxCrop.dx,
+  bottom: controller.maxCrop.dy,
+);
+
+final result = await compressor.compressVideo(
+  inputPath,
+  VVideoCompressionConfig(
+    quality: quality,
+    fallbackToOriginalIfNotSmaller: false,
+    advanced: VVideoAdvancedConfig(
+      trimStartMs: controller.startTrim.inMilliseconds,
+      trimEndMs: controller.endTrim.inMilliseconds,
+      rotation: controller.rotation,
+      cropRect: cropRect,
+      videoCodec: VVideoCodec.h264,
+    ),
+  ),
+);
+```
+
+The example app also includes a focused **Crop, trim & rotate** screen. It uses
+`video_trimmer` for the video preview and draggable trim timeline, then passes
+the selected millisecond range into `VVideoAdvancedConfig`. The example never
+calls `video_trimmer.saveTrimmedVideo`, so trim, crop, rotation, audio handling,
+and compression still happen once through `v_video_compressor`.
+
+For crop-aware exports, `autoAlign` chooses the largest aspect-preserving,
+encoder-safe output inside the quality or custom bounds. `letterbox` is the
+only mode that intentionally centers the crop in a larger canvas with bars.
+`exact` accepts even custom dimensions only when they preserve the selected
+crop aspect within one output pixel; incompatible or sub-`16x16` outputs are
+rejected.
+
+The integration suite includes deterministic quadrant fixtures and an opt-in
+iOS network case. The network case downloads Flutter's public H.264/AAC
+`bee.mp4` sample inside the simulator, then verifies crop, trim, audio,
+dimensions, and playability:
+
+```bash
+cd example
+flutter test integration_test \
+  -d <ios-simulator-id> \
+  --dart-define=VVC_RUN_NETWORK_INTEGRATION=true \
+  --plain-name "downloads a public Flutter video and exports crop on iOS"
+```
+
+An additional opt-in iOS audit exercises every public compression setting and
+prints machine-readable `PASS`, `FAIL`, or `UNSUPPORTED` results after
+inspecting the encoded tracks and decoded thumbnails:
+
+```bash
+cd example
+flutter test integration_test/ios_compression_feature_audit_test.dart \
+  -d <ios-simulator-id> \
+  --dart-define=VVC_RUN_IOS_FEATURE_AUDIT=true
+```
+
 ### Guarantee an Encoded Output
 
 By default, the plugin returns the original file when encoding saves less than
 5% to avoid wasting storage. Disable that fallback when the requested codec or
-container is required:
+container is required. The plugin automatically prohibits original-file
+fallback whenever an effective crop, trim, nonzero rotation, custom size,
+audio removal, or explicit codec request requires the encoded output. This
+prevents a successful export from silently discarding edits.
 
 ```dart
 final result = await _compressor.compressVideo(

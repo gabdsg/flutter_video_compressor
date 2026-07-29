@@ -68,4 +68,70 @@ void main() {
     expect(config['fallbackToOriginalIfNotSmaller'], isFalse);
     expect(result!.usedOriginalFile, isTrue);
   });
+
+  test('compressVideo sends nested crop and suppresses edited fallback',
+      () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (methodCall) async {
+      capturedCall = methodCall;
+      return null;
+    });
+
+    await platform.compressVideo(
+      '/input.mp4',
+      const VVideoCompressionConfig.medium(
+        fallbackToOriginalIfNotSmaller: true,
+        advanced: VVideoAdvancedConfig(
+          trimStartMs: 100,
+          rotation: 90,
+          cropRect: VVideoCropRect(
+            left: 0,
+            top: 0.25,
+            right: 0.5,
+            bottom: 0.75,
+          ),
+        ),
+      ),
+    );
+
+    final arguments = capturedCall!.arguments as Map<Object?, Object?>;
+    final config = arguments['config'] as Map<Object?, Object?>;
+    final advanced = config['advanced'] as Map<Object?, Object?>;
+    expect(config['fallbackToOriginalIfNotSmaller'], isFalse);
+    expect(advanced['cropRect'], {
+      'left': 0.0,
+      'top': 0.25,
+      'right': 0.5,
+      'bottom': 0.75,
+    });
+  });
+
+  test('full-frame crop preserves requested fallback', () async {
+    MethodCall? capturedCall;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (methodCall) async {
+      capturedCall = methodCall;
+      return null;
+    });
+
+    await platform.compressVideo(
+      '/input.mp4',
+      const VVideoCompressionConfig.medium(
+        advanced: VVideoAdvancedConfig(
+          rotation: 0,
+          cropRect: VVideoCropRect(
+            left: 0,
+            top: 0,
+            right: 1,
+            bottom: 1,
+          ),
+        ),
+      ),
+    );
+
+    final arguments = capturedCall!.arguments as Map<Object?, Object?>;
+    final config = arguments['config'] as Map<Object?, Object?>;
+    expect(config['fallbackToOriginalIfNotSmaller'], isTrue);
+  });
 }

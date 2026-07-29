@@ -100,11 +100,22 @@ public class VVideoCompressorPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
         return
       }
       
-      let quality = VVideoCompressQuality.fromString(qualityStr)
-      let advanced = VVideoAdvancedConfig.fromMap(advancedMap)
-      let estimate = self.compressionEngine.estimateCompressionSize(info, quality: quality, advanced: advanced)
-      
-      result(estimate.toMap())
+      do {
+        let quality = VVideoCompressQuality.fromString(qualityStr)
+        let advanced = try VVideoAdvancedConfig.fromMap(advancedMap)
+        let estimate = self.compressionEngine.estimateCompressionSize(
+          info,
+          quality: quality,
+          advanced: advanced
+        )
+        result(estimate.toMap())
+      } catch {
+        result(FlutterError(
+          code: "INVALID_ARGUMENT",
+          message: error.localizedDescription,
+          details: nil
+        ))
+      }
     }
   }
   
@@ -116,13 +127,23 @@ public class VVideoCompressorPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       return
     }
     
+    let config: VVideoCompressionConfig
+    do {
+      config = try VVideoCompressionConfig.fromMap(configMap)
+    } catch {
+      result(FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: error.localizedDescription,
+        details: nil
+      ))
+      return
+    }
+
     compressionEngine.getVideoInfo(videoPath) { videoInfo in
       guard let info = videoInfo else {
         result(FlutterError(code: "ERROR", message: "Could not get video info", details: nil))
         return
       }
-      
-      let config = VVideoCompressionConfig.fromMap(configMap)
       
       self.compressionEngine.compressVideo(info, config: config, callback: CompressionCallbackImpl(
         onProgress: { progress in
@@ -146,7 +167,17 @@ public class VVideoCompressorPlugin: NSObject, FlutterPlugin, FlutterStreamHandl
       return
     }
     
-    let config = VVideoCompressionConfig.fromMap(configMap)
+    let config: VVideoCompressionConfig
+    do {
+      config = try VVideoCompressionConfig.fromMap(configMap)
+    } catch {
+      result(FlutterError(
+        code: "INVALID_ARGUMENT",
+        message: error.localizedDescription,
+        details: nil
+      ))
+      return
+    }
     var results: [VVideoCompressionResult] = []
     let totalVideos = videoPaths.count
     
